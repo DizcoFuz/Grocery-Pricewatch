@@ -2,13 +2,21 @@
 
 Store chains with adapter_key and default ZIP:
 - Aldi, Walmart, Jewel-Osco, Mariano's, Woodman's, Whole Foods, Target
+
+The default ZIP code is read from the DEFAULT_ZIP env var (default 60601).
+Each store's ZIP is individually editable in the UI after seeding.
 """
 
 from __future__ import annotations
 
+import os
 from sqlalchemy.orm import Session
 
 from app.models import Store
+
+
+def _default_zip() -> str:
+    return os.environ.get("DEFAULT_ZIP", "60601")
 
 
 # Default stores: (name, adapter_key, zip_or_store_id, ad_flip_day)
@@ -73,7 +81,7 @@ def seed_stores(db: Session) -> int:
         store = Store(
             name=store_data["name"],
             adapter_key=store_data["adapter_key"],
-            zip_or_store_id=store_data["zip_or_store_id"],
+            zip_or_store_id=_default_zip(),
             enabled=False,
         )
         db.add(store)

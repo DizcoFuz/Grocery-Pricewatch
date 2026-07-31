@@ -18,6 +18,7 @@ services:
     environment:
       - TESSERACT_URL=http://tesseract:8080/ocr
       - BROWSER_URL=http://browserless:3000
+      - DEFAULT_ZIP=${DEFAULT_ZIP:-60601}
     depends_on:
       tesseract:
         condition: service_healthy

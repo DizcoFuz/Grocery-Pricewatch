@@ -112,6 +112,7 @@ All settings are in the DB (editable via UI Settings page) or `.env`:
 | Setting | Env Var | Default | Description |
 |---------|---------|---------|-------------|
 | Port | `APP_PORT` | `8000` | HTTP port |
+| Default ZIP | `DEFAULT_ZIP` | `60601` | ZIP code for initial store seeding (editable per-store in UI) |
 | Password | `APP_PASSWORD` | (blank) | Shared password for hosted deployments |
 | Refresh time | `REFRESH_TIME` | `07:00` | Daily refresh time |
 | Ad-flip days | `AD_FLIP_DAYS` | `wed,sun` | Extra refresh on these weekdays |
