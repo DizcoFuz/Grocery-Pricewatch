@@ -1,0 +1,62 @@
+# Grocery Pricewatch — full stack
+# Usage:  docker compose up -d --build
+# App:    http://localhost:${APP_PORT:-8000}
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: grocery-app
+    restart: unless-stopped
+    ports:
+      - "${APP_PORT:-8000}:8000"
+    volumes:
+      - grocery-data:/data
+    env_file:
+      - .env
+    environment:
+      - TESSERACT_URL=http://tesseract:8080/ocr
+      - BROWSER_URL=http://browserless:3000
+    depends_on:
+      tesseract:
+        condition: service_healthy
+      browserless:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
+      interval: 30s
+      timeout: 10s
+      start_period: 15s
+      retries: 3
+
+  # ── Headless browser for JS-rendered store ad pages ──────────
+  browserless:
+    image: ghcr.io/browserless/chromium:latest
+    container_name: grocery-browserless
+    restart: unless-stopped
+    environment:
+      - TIMEOUT=60000
+      - MAX_CONCURRENT_SESSIONS=2
+    shm_size: 1g
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 10s
+      retries: 3
+
+  # ── Tesseract OCR server for image/PDF circulars (Woodman's) ─
+  tesseract:
+    image: hertzg/tesseract-server:latest
+    container_name: grocery-tesseract
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/"]
+      interval: 30s
+      timeout: 10s
+      start_period: 5s
+      retries: 3
+
+volumes:
+  grocery-data:
