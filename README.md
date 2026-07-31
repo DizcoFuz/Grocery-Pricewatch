@@ -119,6 +119,73 @@ All settings are in the DB (editable via UI Settings page) or `.env`:
 | Two-store threshold | DB setting | $5.00 | Min savings to recommend a second store |
 | Baseline strategy | DB setting | `was_price` | How to compute non-sale baseline |
 
+## API Reference
+
+Base URL: `/api` (same-origin as the SPA; the frontend's axios client uses `baseURL: ''` and calls `/api/...` directly). All endpoints except `/api/health` require Basic auth when `APP_PASSWORD` is set.
+
+### Public
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/health` | Liveness probe — used by the Docker HEALTHCHECK. Returns `{"status":"ok"}`. |
+
+### Dashboard & data
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/dashboard` | Headline savings, best deals, store statuses, review-queue count |
+| GET | `/api/best-prices` | Per-item current best, last best, delta + direction (FR-4.2/4.3) |
+| GET | `/api/recommendations` | Single-store + two-store recommendations, potential savings pending review |
+| GET | `/api/shopping-list?mode=single\|pair` | Grouped shopping list for the recommended store(s) |
+| GET | `/api/savings` | Cumulative savings (persists across restarts) |
+
+### Refresh
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/refresh-all` | Start background refresh of all enabled stores (returns immediately) |
+| GET | `/api/refresh-all/status` | Poll refresh progress: `running`, `result`, timestamps |
+| POST | `/api/stores/{id}/refresh` | Refresh one store synchronously, returns `StoreRefreshResult` |
+
+### Items
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/items?active=true\|false` | List items |
+| POST | `/api/items` | Create item |
+| PUT | `/api/items/{id}` | Update item |
+| DELETE | `/api/items/{id}` | Delete item |
+| GET | `/api/items/{id}/history` | Price history for item |
+| POST | `/api/items/import/csv?dry_run=true\|false` | Import items from CSV (dry-run previews, no commit) |
+| POST | `/api/items/import/json?dry_run=true\|false` | Import items from JSON |
+| GET | `/api/items/export/csv` | Export items to CSV (Blob) |
+| GET | `/api/items/export/json` | Export items to JSON (Blob) |
+| GET | `/api/items/template/csv` | Download CSV import template |
+| GET | `/api/items/template/json` | Download JSON import template |
+
+### Stores
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/stores` | List stores with `last_fetch_at` + `last_fetch_status` |
+| POST | `/api/stores` | Create store |
+| PUT | `/api/stores/{id}` | Update store (name, adapter, ZIP/store ID, enabled) |
+| DELETE | `/api/stores/{id}` | Delete store |
+
+### Review queue
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/matches/review` | List uncertain matches awaiting user decision |
+| POST | `/api/matches/{id}/decide` | Body `{"decision":"accept"\|"reject"}` — persists a MatchRule so the same offer is auto-applied/skipped next refresh |
+
+### Settings
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/settings` | Get settings bundle |
+| PUT | `/api/settings` | Update settings bundle |
+
 ## Known Limitations (v1)
 
 - **P2-5 — Brand-boost hardening:** The `extract_brand` heuristic may misidentify generic descriptors (e.g., "USDA Choice") as brands. The boost only increases match score (it doesn't override keyword matching), so impact is limited, but the heuristic could be tightened by requiring brand tokens to appear in the offer text.
