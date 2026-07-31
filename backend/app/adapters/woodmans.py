@@ -8,7 +8,7 @@ https://www.woodmans-food.com/weekly-ads (or similar).
 
 1. **Primary** — Scrape the ads page for links to weekly-ad PDFs or images.
 2. **Download** the PDF/image.
-3. **OCR** via a tesseract HTTP service at ``http://tesseract:8080/ocr``
+3. **OCR** via a tesseract HTTP service at ``http://tesseract:8884/ocr``
    (container in the docker-compose stack).
 4. **Parse** the OCR text with regex patterns for price/size, then structure
    into :class:`OfferData`.
@@ -60,7 +60,7 @@ class WoodmansAdapter(StoreAdapter):
     def __init__(self, store_id: str = "woodmans", zip_or_store_id: str = "") -> None:
         super().__init__(store_id, zip_or_store_id or "default")
         self.tesseract_url = os.environ.get(
-            "TESSERACT_URL", "http://tesseract:8080/ocr"
+            "TESSERACT_URL", "http://tesseract:8884/ocr"
         )
 
     async def fetch_current_ad(self) -> tuple[list[OfferData], AdMetadata]:
