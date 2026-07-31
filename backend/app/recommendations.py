@@ -138,9 +138,11 @@ def _get_best_match_for_item(
 
 
 def _get_best_match_uncertain(
-    db: Session, item_id: int, store_id: int
+    db: Session, item: Item, store_id: int
 ) -> tuple[Match | None, Offer | None]:
-    """Find uncertain (potential) match for an item at a store."""
+    """Find the lowest-priced uncertain (potential) match for an item at a
+    store (same pattern as _get_best_match_for_item but for uncertain status).
+    """
     cycle = crud.get_latest_ad_cycle(db, store_id)
     if cycle is None:
         return None, None
@@ -149,15 +151,30 @@ def _get_best_match_uncertain(
         .join(Offer, Match.offer_id == Offer.id)
         .filter(
             Offer.ad_cycle_id == cycle.id,
-            Match.item_id == item_id,
+            Match.item_id == item.id,
             Match.status == MatchStatus.uncertain,
         )
         .all()
     )
     if not matches:
         return None, None
-    best_match = matches[0]
-    best_offer = db.get(Offer, best_match.offer_id)
+    # Pick the match whose offer has the lowest comparable price.
+    # P0-4: precise (non-approximate) offers beat approximate ones at equal price.
+    best_match: Match | None = None
+    best_offer: Offer | None = None
+    best_price: int | None = None
+    best_approx: bool = True
+    for m in matches:
+        offer = db.get(Offer, m.offer_id)
+        if offer is None:
+            continue
+        price, approx = compute_comparable_price(offer, item)
+        if best_price is None:
+            best_match, best_offer, best_price, best_approx = m, offer, price, approx
+            continue
+        # A precise offer wins ties against an approximate one.
+        if price < best_price or (price == best_price and best_approx and not approx):
+            best_match, best_offer, best_price, best_approx = m, offer, price, approx
     return best_match, best_offer
 
 
@@ -418,12 +435,37 @@ def compute_recommendations(db: Session) -> RecommendationsResponse:
         # Even if below threshold, show the best pair but note it's not recommended
         best_pair = two_store[0]
 
+    # FR-5.4: potential additional savings pending review.
+    # For each item that has uncertain matches but no confident/accepted match
+    # at the best store, compute the potential savings (baseline - uncertain_price)
+    # and sum them.
+    potential_savings_pending_review = 0
+    if best_single is not None:
+        items = crud.get_items(db, active_only=True)
+        best_store_id = best_single.store_id
+        for item in items:
+            baseline = _get_item_baseline(db, item)
+            if baseline is None:
+                continue
+            # Check if there's a confident/accepted match at the best store
+            confident_match, confident_offer = _get_best_match_for_item(db, item, best_store_id)
+            if confident_match is not None:
+                continue  # Already has a confident/accepted match — no pending savings
+            # Check for uncertain matches at the best store
+            uncertain_match, uncertain_offer = _get_best_match_uncertain(db, item, best_store_id)
+            if uncertain_match is not None and uncertain_offer is not None:
+                uncertain_price, _ = compute_comparable_price(uncertain_offer, item)
+                potential = baseline - uncertain_price
+                if potential > 0:
+                    potential_savings_pending_review += potential
+
     return RecommendationsResponse(
         single=single,
         best_single=best_single,
         two_store=two_store,
         best_pair=best_pair,
         two_store_threshold=threshold,
+        potential_savings_pending_review=potential_savings_pending_review,
     )
 
 

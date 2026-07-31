@@ -58,6 +58,7 @@ export default function Items() {
   const [importResult, setImportResult] = useState<ItemImportResult | null>(null)
   const [importFile, setImportFile] = useState<File | null>(null)
   const [importError, setImportError] = useState<string | null>(null)
+  const [importConfirmed, setImportConfirmed] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const { data: items, isLoading, isError, error } = useQuery({
@@ -81,7 +82,14 @@ export default function Items() {
   })
 
   const importMut = useMutation({
-    mutationFn: (file: File) => importItemsCsv(file),
+    mutationFn: (file: File) => importItemsCsv(file, true),
+    onSuccess: (result) => setImportResult(result),
+    onError: (e) => setImportError((e as Error).message),
+    onSettled: () => qc.invalidateQueries({ queryKey: ['items'] }),
+  })
+
+  const confirmImportMut = useMutation({
+    mutationFn: (file: File) => importItemsCsv(file, false),
     onSuccess: (result) => setImportResult(result),
     onError: (e) => setImportError((e as Error).message),
     onSettled: () => qc.invalidateQueries({ queryKey: ['items'] }),
@@ -113,6 +121,7 @@ export default function Items() {
     setImportFile(file)
     setImportError(null)
     setImportResult(null)
+    setImportConfirmed(false)
     importMut.mutate(file)
   }
 
@@ -120,7 +129,14 @@ export default function Items() {
     setImportResult(null)
     setImportFile(null)
     setImportError(null)
+    setImportConfirmed(false)
     if (fileInputRef.current) fileInputRef.current.value = ''
+  }
+
+  const confirmImport = () => {
+    if (!importFile) return
+    setImportConfirmed(true)
+    confirmImportMut.mutate(importFile)
   }
 
   return (
@@ -180,6 +196,9 @@ export default function Items() {
         <ImportResultModal
           result={importResult}
           file={importFile}
+          isPreview={!importConfirmed}
+          confirming={confirmImportMut.isPending}
+          onConfirm={confirmImport}
           onClose={closeImport}
         />
       )}
@@ -191,6 +210,12 @@ export default function Items() {
         </div>
       )}
       {importMut.isPending && (
+        <div className="flex items-center gap-2 text-sm text-gray-600 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">
+          <Upload size={16} className="animate-pulse" />
+          Preparing import preview…
+        </div>
+      )}
+      {confirmImportMut.isPending && (
         <div className="flex items-center gap-2 text-sm text-gray-600 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">
           <Upload size={16} className="animate-pulse" />
           Importing…
@@ -499,10 +524,13 @@ function ItemForm({
 
 // ── Import result modal ───────────────────────────────────────
 function ImportResultModal({
-  result, file, onClose,
+  result, file, isPreview, confirming, onConfirm, onClose,
 }: {
   result: ItemImportResult
   file: File | null
+  isPreview: boolean
+  confirming: boolean
+  onConfirm: () => void
   onClose: () => void
 }) {
   return (
@@ -510,10 +538,21 @@ function ImportResultModal({
       <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[80vh] flex flex-col">
         <div className="flex items-center justify-between p-4 border-b">
           <div>
-            <h2 className="text-lg font-semibold">Import result</h2>
+            <h2 className="text-lg font-semibold">
+              {isPreview ? 'Import preview' : 'Import result'}
+            </h2>
             <p className="text-sm text-gray-500">
-              {result.imported} imported, {result.skipped_duplicates} duplicates skipped, {result.errors.length} errors out of {result.total_rows} rows
-              {file && ` · ${file.name}`}
+              {isPreview ? (
+                <>
+                  {result.total_rows} rows: {result.skipped_duplicates} duplicates, {result.errors.length} errors, {result.preview.length - result.skipped_duplicates} new items ready to import
+                  {file && ` · ${file.name}`}
+                </>
+              ) : (
+                <>
+                  {result.imported} imported, {result.skipped_duplicates} duplicates skipped, {result.errors.length} errors out of {result.total_rows} rows
+                  {file && ` · ${file.name}`}
+                </>
+              )}
             </p>
           </div>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={18} /></button>
@@ -536,8 +575,8 @@ function ImportResultModal({
               </tr>
             </thead>
             <tbody className="divide-y">
-              {result.preview.map((r) => (
-                <tr key={r.id}>
+              {result.preview.map((r, i) => (
+                <tr key={`${r.id}-${i}`}>
                   <td className="px-2 py-1.5">{r.name}</td>
                   <td className="px-2 py-1.5">{r.category || '—'}</td>
                   <td className="px-2 py-1.5">{r.unit_of_measure || '—'}</td>
@@ -545,16 +584,35 @@ function ImportResultModal({
               ))}
               {result.preview.length === 0 && (
                 <tr>
-                  <td colSpan={3} className="px-2 py-4 text-center text-gray-400">No items imported.</td>
+                  <td colSpan={3} className="px-2 py-4 text-center text-gray-400">No items to import.</td>
                 </tr>
               )}
             </tbody>
           </table>
         </div>
         <div className="flex justify-end gap-2 p-4 border-t">
-          <button onClick={onClose} className="px-4 py-2 bg-deal-fresh text-white rounded-lg text-sm font-medium hover:bg-green-700">
-            Done
-          </button>
+          {isPreview ? (
+            <>
+              <button
+                onClick={onClose}
+                disabled={confirming}
+                className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg text-sm font-medium disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={onConfirm}
+                disabled={confirming || result.preview.filter(p => p.id === 0).length === 0}
+                className="px-4 py-2 bg-deal-fresh text-white rounded-lg text-sm font-medium hover:bg-green-700 disabled:opacity-50"
+              >
+                {confirming ? 'Importing…' : 'Confirm import'}
+              </button>
+            </>
+          ) : (
+            <button onClick={onClose} className="px-4 py-2 bg-deal-fresh text-white rounded-lg text-sm font-medium hover:bg-green-700">
+              Done
+            </button>
+          )}
         </div>
       </div>
     </div>

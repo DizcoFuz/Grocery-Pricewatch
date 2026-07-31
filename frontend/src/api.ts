@@ -86,17 +86,20 @@ export async function deleteItem(id: number): Promise<void> {
 }
 
 // ── Items import / export / template ──────────────────────────
-export async function importItemsCsv(file: File): Promise<ItemImportResult> {
+export async function importItemsCsv(file: File, dryRun?: boolean): Promise<ItemImportResult> {
   const form = new FormData()
   form.append('file', file)
+  const params = dryRun ? { dry_run: true } : {}
   const { data } = await client.post<ItemImportResult>('/api/items/import/csv', form, {
     headers: { 'Content-Type': 'multipart/form-data' },
+    params,
   })
   return data
 }
 
-export async function importItemsJson(rows: ItemImportRow[]): Promise<ItemImportResult> {
-  const { data } = await client.post<ItemImportResult>('/api/items/import/json', rows)
+export async function importItemsJson(rows: ItemImportRow[], dryRun?: boolean): Promise<ItemImportResult> {
+  const params = dryRun ? { dry_run: true } : {}
+  const { data } = await client.post<ItemImportResult>('/api/items/import/json', rows, { params })
   return data
 }
 

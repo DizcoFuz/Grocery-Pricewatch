@@ -1,0 +1,90 @@
+{
+  "_mock_note": "Mock fixture — represents expected Flipp API response format for ALDI. Not yet verified against live endpoint.",
+  "flyers_response": [
+    {
+      "id": 781524,
+      "merchant_name": "ALDI",
+      "name": "ALDI Weekly Ad",
+      "category": "grocery",
+      "valid_from": "2024-01-01T00:00:00Z",
+      "valid_to": "2030-12-31T23:59:59Z",
+      "thumbnail_url": "https://cdn.flipp.com/aldi/weekly.jpg",
+      "store_id": 60601
+    }
+  ],
+  "flyer_details": {
+    "781524": {
+      "id": 781524,
+      "name": "ALDI Weekly Ad",
+      "merchant_name": "ALDI",
+      "valid_from": "2024-01-01T00:00:00Z",
+      "valid_to": "2030-12-31T23:59:59Z",
+      "flyer_items": [
+        {
+          "name": "Organic Bananas, 1 lb bag",
+          "current_price": 0.69,
+          "original_price": 0.89,
+          "sale_story": "Save $0.20",
+          "display_type": 1,
+          "brand": "ALDI",
+          "size": "1 lb bag",
+          "cutout_image_url": "https://cdn.flipp.com/aldi/bananas.jpg",
+          "valid_to": "2030-12-31T23:59:59Z"
+        },
+        {
+          "name": "Friendly Farms Whole Milk, 1 gallon",
+          "current_price": 2.89,
+          "sale_story": "Weekly ad price",
+          "display_type": 1,
+          "brand": "Friendly Farms",
+          "size": "1 gallon",
+          "cutout_image_url": "https://cdn.flipp.com/aldi/milk.jpg"
+        },
+        {
+          "name": "Large Grade A Eggs, 12 ct",
+          "current_price": 1.49,
+          "original_price": 2.19,
+          "sale_story": "Save $0.70",
+          "display_type": 1,
+          "brand": "Goldhen",
+          "size": "12 count",
+          "cutout_image_url": "https://cdn.flipp.com/aldi/eggs.jpg"
+        },
+        {
+          "name": "85% Lean Ground Beef, 1 lb",
+          "current_price": 3.99,
+          "sale_story": "Weekly ad price",
+          "display_type": 1,
+          "brand": "ALDI",
+          "size": "1 lb",
+          "cutout_image_url": "https://cdn.flipp.com/aldi/groundbeef.jpg"
+        },
+        {
+          "name": "Sourdough Bread, 24 oz",
+          "current_price": 2.49,
+          "sale_story": "Buy 2 for $4.00",
+          "display_type": 1,
+          "brand": "L'Oven Fresh",
+          "size": "24 oz",
+          "cutout_image_url": "https://cdn.flipp.com/aldi/bread.jpg"
+        },
+        {
+          "name": "Download the ALDI app for exclusive deals",
+          "display_type": 5,
+          "current_price": 0,
+          "sale_story": "",
+          "cutout_image_url": "https://cdn.flipp.com/aldi/appbanner.jpg"
+        },
+        {
+          "name": "Coca-Cola 12-pack",
+          "current_price": 5.99,
+          "sale_story": "Weekly ad price",
+          "display_type": 1,
+          "ttm_url": "https://flipp.com/ttm/coca-cola",
+          "brand": "Coca-Cola",
+          "size": "12 pack"
+        }
+      ]
+    }
+  }
+}

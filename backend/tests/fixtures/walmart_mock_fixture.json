@@ -1,0 +1,92 @@
+{
+  "_mock_note": "Mock fixture — represents expected Flipp API response format for Walmart grocery rollbacks. Not yet verified against live endpoint. Product names contain grocery keywords for the _is_grocery filter.",
+  "flyers_response": [
+    {
+      "id": 545678,
+      "merchant_name": "Walmart",
+      "name": "Walmart Grocery Rollback",
+      "category": "grocery",
+      "valid_from": "2024-01-01T00:00:00Z",
+      "valid_to": "2030-12-31T23:59:59Z",
+      "thumbnail_url": "https://cdn.flipp.com/walmart/weekly.jpg",
+      "store_id": 60601
+    }
+  ],
+  "flyer_details": {
+    "545678": {
+      "id": 545678,
+      "name": "Walmart Grocery Rollback",
+      "merchant_name": "Walmart",
+      "valid_from": "2024-01-01T00:00:00Z",
+      "valid_to": "2030-12-31T23:59:59Z",
+      "flyer_items": [
+        {
+          "name": "Great Value Whole Milk, 1 gallon",
+          "current_price": 2.78,
+          "original_price": 3.18,
+          "sale_story": "Rollback: was $3.18",
+          "display_type": 1,
+          "brand": "Great Value",
+          "size": "1 gallon",
+          "cutout_image_url": "https://cdn.flipp.com/walmart/milk.jpg"
+        },
+        {
+          "name": "Sara Lee Sliced Bread, 20 oz",
+          "current_price": 1.98,
+          "original_price": 2.48,
+          "sale_story": "Rollback: was $2.48",
+          "display_type": 1,
+          "brand": "Sara Lee",
+          "size": "20 oz",
+          "cutout_image_url": "https://cdn.flipp.com/walmart/bread.jpg"
+        },
+        {
+          "name": "Great Value Large Eggs, 12 ct",
+          "current_price": 1.47,
+          "original_price": 1.97,
+          "sale_story": "Rollback: was $1.97",
+          "display_type": 1,
+          "brand": "Great Value",
+          "size": "12 count",
+          "cutout_image_url": "https://cdn.flipp.com/walmart/eggs.jpg"
+        },
+        {
+          "name": "Tyson Chicken Breast, 2.25 lb",
+          "current_price": 6.97,
+          "original_price": 8.97,
+          "sale_story": "Rollback: was $8.97",
+          "display_type": 1,
+          "brand": "Tyson",
+          "size": "2.25 lb",
+          "cutout_image_url": "https://cdn.flipp.com/walmart/chicken.jpg"
+        },
+        {
+          "name": "Minute White Rice, 28 oz",
+          "current_price": 2.48,
+          "sale_story": "Rollback",
+          "display_type": 1,
+          "brand": "Minute",
+          "size": "28 oz",
+          "cutout_image_url": "https://cdn.flipp.com/walmart/rice.jpg"
+        },
+        {
+          "name": "Tide Detergent, 92 fl oz",
+          "current_price": 11.97,
+          "original_price": 13.97,
+          "sale_story": "Rollback: was $13.97",
+          "display_type": 1,
+          "brand": "Tide",
+          "size": "92 fl oz",
+          "cutout_image_url": "https://cdn.flipp.com/walmart/tide.jpg"
+        },
+        {
+          "name": "Walmart App Promo",
+          "display_type": 5,
+          "current_price": 0,
+          "sale_story": "",
+          "cutout_image_url": "https://cdn.flipp.com/walmart/app.jpg"
+        }
+      ]
+    }
+  }
+}

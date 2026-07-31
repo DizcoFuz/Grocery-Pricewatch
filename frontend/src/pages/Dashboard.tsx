@@ -11,8 +11,8 @@ import {
   ChevronUp,
 } from 'lucide-react'
 import { Link } from 'react-router-dom'
-import { getDashboard, refreshAll, getRefreshAllStatus } from '../api'
-import type { DashboardResponse, DashboardBestDeal, StoreStatus as StoreStatusRow, BestPriceEntry } from '../types'
+import { getDashboard, refreshAll, getRefreshAllStatus, getRecommendations } from '../api'
+import type { DashboardResponse, DashboardBestDeal, StoreStatus as StoreStatusRow, BestPriceEntry, RecommendationsResponse } from '../types'
 import { formatCents, relativeTime } from '../types'
 import StoreStatusBadge from '../components/StoreStatusBadge'
 import PriceDelta from '../components/PriceDelta'
@@ -24,6 +24,11 @@ export default function Dashboard() {
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['dashboard'],
     queryFn: getDashboard,
+  })
+
+  const recsQuery = useQuery({
+    queryKey: ['recommendations'],
+    queryFn: getRecommendations,
   })
 
   const refreshMut = useMutation({
@@ -107,7 +112,7 @@ export default function Dashboard() {
       )}
 
       {/* Headline savings card */}
-      <HeadlineCard data={data} />
+      <HeadlineCard data={data} recs={recsQuery.data} />
 
       {/* Store fetch status strip */}
       <StoreStatusStrip data={data} />
@@ -136,7 +141,8 @@ export default function Dashboard() {
 }
 
 // ── Headline card ──────────────────────────────────────────────
-function HeadlineCard({ data }: { data: DashboardResponse }) {
+function HeadlineCard({ data, recs }: { data: DashboardResponse; recs?: RecommendationsResponse }) {
+  const potentialSavings = recs?.potential_savings_pending_review ?? 0
   return (
     <div className="bg-gradient-to-br from-green-600 to-green-800 text-white rounded-2xl p-6 shadow-lg">
       <div className="flex items-start justify-between flex-wrap gap-4">
@@ -150,6 +156,11 @@ function HeadlineCard({ data }: { data: DashboardResponse }) {
           <p className="text-green-100 text-sm mt-2">
             {data.last_report ? `Week of ${data.last_report.week}` : 'No report yet'}
           </p>
+          {potentialSavings > 0 && (
+            <p className="text-green-200 text-sm mt-1">
+              + {formatCents(potentialSavings)} potential additional savings pending your review
+            </p>
+          )}
         </div>
         <div className="text-right">
           <p className="text-green-100 text-sm font-medium uppercase tracking-wide">

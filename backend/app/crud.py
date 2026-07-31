@@ -215,8 +215,14 @@ def _parse_int_cents(val: Any) -> int | None:
         return None
 
 
-def import_items_csv(db: Session, csv_content: str) -> ItemImportResult:
+def import_items_csv(db: Session, csv_content: str, *, dry_run: bool = False) -> ItemImportResult:
     """Import items from CSV text with dedup and per-row errors.
+
+    When dry_run=True: parse all rows, validate, deduplicate, but do NOT
+    commit to DB.  Return ItemImportResult with preview populated and
+    imported=0.
+
+    When dry_run=False (default): commit each valid row and return result.
 
     Columns expected: name, category, match_keywords, exclude_keywords,
     preferred_brands, unit_of_measure, typical_quantity, baseline_price_override, active
@@ -253,14 +259,23 @@ def import_items_csv(db: Session, csv_content: str) -> ItemImportResult:
                 baseline_price_override=_parse_int_cents(row.get("baseline_price_override") or row.get("baseline_price")),
                 active=(row.get("active") or "true").strip().lower() in ("true", "1", "yes"),
             )
-            db.add(item)
-            db.commit()
-            db.refresh(item)
-            imported += 1
-            preview.append(ItemRead.model_validate(item))
+            if dry_run:
+                # Build a preview ItemRead without committing.
+                # The item has no id/created_at yet; synthesize a preview-only copy.
+                from datetime import datetime, timezone
+                item.id = 0  # placeholder for preview
+                item.created_at = datetime.now(timezone.utc)
+                preview.append(ItemRead.model_validate(item))
+            else:
+                db.add(item)
+                db.commit()
+                db.refresh(item)
+                imported += 1
+                preview.append(ItemRead.model_validate(item))
         except Exception as exc:
             errors.append(f"Row {i} ({name}): {exc!s}")
-            db.rollback()
+            if not dry_run:
+                db.rollback()
     return ItemImportResult(
         total_rows=len(preview) + len(errors),
         imported=imported,
@@ -270,8 +285,15 @@ def import_items_csv(db: Session, csv_content: str) -> ItemImportResult:
     )
 
 
-def import_items_json(db: Session, json_content: str) -> ItemImportResult:
-    """Import items from a JSON array string."""
+def import_items_json(db: Session, json_content: str, *, dry_run: bool = False) -> ItemImportResult:
+    """Import items from a JSON array string.
+
+    When dry_run=True: parse all rows, validate, deduplicate, but do NOT
+    commit to DB.  Return ItemImportResult with preview populated and
+    imported=0.
+
+    When dry_run=False (default): commit each valid row and return result.
+    """
     errors: list[str] = []
     imported = 0
     skipped = 0
@@ -307,14 +329,21 @@ def import_items_json(db: Session, json_content: str) -> ItemImportResult:
                 baseline_price_override=_parse_int_cents(row.get("baseline_price_override") or row.get("baseline_price")),
                 active=bool(row.get("active", True)),
             )
-            db.add(item)
-            db.commit()
-            db.refresh(item)
-            imported += 1
-            preview.append(ItemRead.model_validate(item))
+            if dry_run:
+                from datetime import datetime, timezone
+                item.id = 0  # placeholder for preview
+                item.created_at = datetime.now(timezone.utc)
+                preview.append(ItemRead.model_validate(item))
+            else:
+                db.add(item)
+                db.commit()
+                db.refresh(item)
+                imported += 1
+                preview.append(ItemRead.model_validate(item))
         except Exception as exc:
             errors.append(f"Row {i} ({name}): {exc!s}")
-            db.rollback()
+            if not dry_run:
+                db.rollback()
     return ItemImportResult(
         total_rows=len(rows),
         imported=imported,

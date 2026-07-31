@@ -1,0 +1,5 @@
+{
+  "_mock_note": "Mock fixture — represents expected OCR text output from tesseract for Woodman's weekly ad. Not yet verified against live endpoint.",
+  "ocr_text": "Woodman's Market Weekly Ad\nValid 07/24 - 07/30\n\nOrganic Bananas $0.69 /lb\nWhole Milk $2.89\nLarge Eggs 12ct $1.99\nGround Beef 85% Lean $3.99 /lb\nSourdough Bread $2.49\nChicken Breast $1.99 /lb\nRoma Tomatoes $0.99 /lb\nYellow Onions $0.79 /lb\nIceberg Lettuce $1.29\ncoca cola 12 pack $5.99\nCheese Pizza 16oz $3.49\nOrange Juice 59oz $3.99\ncereal cheerios 8.9oz $2.99",
+  "confidence": 85.5
+}

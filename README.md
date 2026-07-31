@@ -62,15 +62,17 @@ The app starts with 7 default stores (disabled by default) and an empty item lis
 
 Each store uses a different acquisition strategy, documented per adapter:
 
-| Store | Primary Source | Fallback | Notes |
-|-------|---------------|----------|-------|
-| Aldi | Flipp API | HTML scrape | New ads Wed |
-| Walmart | Deals/rollbacks API | HTML scrape | No circular; rollbacks filtered to grocery |
-| Jewel-Osco | Flipp API | Albertsons API → HTML | Albertsons banner; Wed–Tue |
-| Mariano's | Flipp API | HTML scrape | Kroger banner; Wed–Tue |
-| Woodman's | OCR (Tesseract) | — | PDF/image circulars; flags "partial" on low confidence |
-| Whole Foods | Sales flyer API/HTML | — | Regular + Prime member prices as separate offers |
-| Target | Weekly ad JSON + Circle API | HTML scrape | Circle offers require clip (membership) |
+| Store | Primary Source | Fallback | Verified | Notes |
+|-------|---------------|----------|----------|-------|
+| Aldi | Flipp API | HTML scrape | Not yet verified — mock fixture | New ads Wed |
+| Walmart | Deals/rollbacks API | HTML scrape | Not yet verified — mock fixture | No circular; rollbacks filtered to grocery |
+| Jewel-Osco | Flipp API | Albertsons API → HTML | Not yet verified — mock fixture | Albertsons banner; Wed–Tue |
+| Mariano's | Flipp API | HTML scrape | Not yet verified — mock fixture | Kroger banner; Wed–Tue |
+| Woodman's | OCR (Tesseract) | — | Not yet verified — mock fixture | PDF/image circulars; flags "partial" on low confidence |
+| Whole Foods | Sales flyer API/HTML | — | Not yet verified — mock fixture | Regular + Prime member prices as separate offers |
+| Target | Weekly ad JSON + Circle API | HTML scrape | Not yet verified — mock fixture | Circle offers require clip (membership) |
+
+**Fixture tests:** Each adapter has a recorded fixture test under `backend/tests/test_adapters.py` that loads a mock JSON fixture (matching the expected API response format derived from the adapter source code) and verifies the parser correctly extracts offers, prices, deal types, and metadata. Fixtures are mock-based — no adapter has been verified against a live store endpoint yet. When a live fetch is performed, replace the mock fixture with the sanitized real response and drop the `_mock_` infix from the filename.
 
 **ToS note:** Scraping retail sites may violate their Terms of Service. Prefer official/partner APIs (e.g., Kroger public API, Flipp) where available. The app rate-limits politely (≥2s between requests per host), caches aggressively, and identifies the client honestly. Stores where only ToS-problematic access exists are flagged in the adapter docstrings.
 
@@ -115,6 +117,13 @@ All settings are in the DB (editable via UI Settings page) or `.env`:
 | Ad-flip days | `AD_FLIP_DAYS` | `wed,sun` | Extra refresh on these weekdays |
 | Two-store threshold | DB setting | $5.00 | Min savings to recommend a second store |
 | Baseline strategy | DB setting | `was_price` | How to compute non-sale baseline |
+
+## Known Limitations (v1)
+
+- **P2-5 — Brand-boost hardening:** The `extract_brand` heuristic may misidentify generic descriptors (e.g., "USDA Choice") as brands. The boost only increases match score (it doesn't override keyword matching), so impact is limited, but the heuristic could be tightened by requiring brand tokens to appear in the offer text.
+- **P2-10 — Realized savings ("shopped it" checkbox):** FR-6.2 is an optional nice-to-have that is not yet implemented. The shopping list has checkboxes in the UI but they are not persisted or used to compute realized savings vs. projected savings.
+- **Adapter verification:** Adapter endpoints have been researched and updated to use plausible real APIs (Flipp `backflipp.wishabi.com`, Target `redsky.target.com`, etc.), but no adapter has been verified against a live store endpoint. Fixture-based parser tests exist under `backend/tests/fixtures/` but are mock-based. See the "Verified" column in the adapter table above.
+- **Docker compose build:** Not yet verified end-to-end from a clean checkout (R-5 from re-review). The Dockerfile and compose file are structurally complete, but `docker compose up --build` should be run on a host with Docker to verify: healthchecks pass, SPA loads at `/`, auth engages when `APP_PASSWORD` is set, and data survives `down`/`up`.
 
 ## License
 

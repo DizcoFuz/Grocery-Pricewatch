@@ -1,0 +1,80 @@
+{
+  "_mock_note": "Mock fixture — represents expected Flipp API response format for Mariano's. Not yet verified against live endpoint.",
+  "flyers_response": [
+    {
+      "id": 673890,
+      "merchant_name": "Mariano's",
+      "name": "Mariano's Weekly Ad",
+      "category": "grocery",
+      "valid_from": "2024-01-01T00:00:00Z",
+      "valid_to": "2030-12-31T23:59:59Z",
+      "thumbnail_url": "https://cdn.flipp.com/marianos/weekly.jpg",
+      "store_id": 60601
+    }
+  ],
+  "flyer_details": {
+    "673890": {
+      "id": 673890,
+      "name": "Mariano's Weekly Ad",
+      "merchant_name": "Mariano's",
+      "valid_from": "2024-01-01T00:00:00Z",
+      "valid_to": "2030-12-31T23:59:59Z",
+      "flyer_items": [
+        {
+          "name": "Organic Bananas, 2 lb bag",
+          "current_price": 1.99,
+          "original_price": 2.49,
+          "sale_story": "Save $0.50",
+          "display_type": 1,
+          "brand": "Mariano's",
+          "size": "2 lb bag",
+          "cutout_image_url": "https://cdn.flipp.com/marianos/bananas.jpg"
+        },
+        {
+          "name": "Mariano's Whole Milk, 1 gallon",
+          "current_price": 3.29,
+          "sale_story": "Weekly ad price",
+          "display_type": 1,
+          "brand": "Mariano's",
+          "size": "1 gallon",
+          "cutout_image_url": "https://cdn.flipp.com/marianos/milk.jpg"
+        },
+        {
+          "name": "USDA Choice Ribeye Steak, 1 lb",
+          "current_price": 12.99,
+          "original_price": 16.99,
+          "sale_story": "Save $4.00",
+          "display_type": 1,
+          "brand": "Mariano's",
+          "size": "per lb",
+          "cutout_image_url": "https://cdn.flipp.com/marianos/ribeye.jpg"
+        },
+        {
+          "name": "Coca-Cola, 12 pack",
+          "current_price": 5.99,
+          "sale_story": "2 for $10.00",
+          "display_type": 1,
+          "brand": "Coca-Cola",
+          "size": "12 pack",
+          "cutout_image_url": "https://cdn.flipp.com/marianos/coke.jpg"
+        },
+        {
+          "name": "Mariano's Artisan Sourdough Bread",
+          "current_price": 4.99,
+          "sale_story": "Weekly ad price",
+          "display_type": 1,
+          "brand": "Mariano's",
+          "size": "24 oz",
+          "cutout_image_url": "https://cdn.flipp.com/marianos/bread.jpg"
+        },
+        {
+          "name": "Pharmacy Rewards Banner",
+          "display_type": 5,
+          "current_price": 0,
+          "sale_story": "",
+          "cutout_image_url": "https://cdn.flipp.com/marianos/banner.jpg"
+        }
+      ]
+    }
+  }
+}

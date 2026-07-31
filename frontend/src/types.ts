@@ -213,6 +213,7 @@ export interface RecommendationsResponse {
   two_store: TwoStoreRecommendation[]
   best_pair: TwoStoreRecommendation | null
   two_store_threshold: number
+  potential_savings_pending_review: number
 }
 
 // ── Savings ──────────────────────────────────────────────────

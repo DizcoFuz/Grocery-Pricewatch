@@ -306,6 +306,7 @@ class RecommendationsResponse(BaseModel):
     two_store: list[TwoStoreRecommendation]
     best_pair: TwoStoreRecommendation | None
     two_store_threshold: int
+    potential_savings_pending_review: int = 0
 
 
 # ---------------------------------------------------------------------------

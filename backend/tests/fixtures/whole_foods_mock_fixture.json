@@ -1,0 +1,50 @@
+{
+  "_mock_note": "Mock fixture — represents expected Whole Foods sales-flyer __NEXT_DATA__ format. Not yet verified against live endpoint.",
+  "next_data": {
+    "props": {
+      "pageProps": {
+        "sales": [
+          {
+            "name": "365 Organic Strawberries",
+            "brand": "365 by Whole Foods Market",
+            "size": "1 lb",
+            "description": "Organic strawberries, fresh",
+            "salePrice": 4.99,
+            "primePrice": 3.99
+          },
+          {
+            "name": "365 Whole Milk",
+            "brand": "365 by Whole Foods Market",
+            "size": "1 gallon",
+            "description": "Whole milk, gallon",
+            "salePrice": 5.49,
+            "primePrice": 4.49
+          },
+          {
+            "name": "365 Large Eggs",
+            "brand": "365 by Whole Foods Market",
+            "size": "12 ct",
+            "description": "Large Grade A eggs",
+            "salePrice": 3.99
+          },
+          {
+            "name": "365 Organic Ground Beef",
+            "brand": "365 by Whole Foods Market",
+            "size": "1 lb",
+            "description": "85% lean ground beef",
+            "salePrice": 6.99,
+            "primePrice": 5.99
+          },
+          {
+            "name": "365 Organic Bananas",
+            "brand": "365 by Whole Foods Market",
+            "size": "per lb",
+            "description": "Organic bananas",
+            "salePrice": 0.79
+          }
+        ]
+      }
+    }
+  },
+  "valid_dates_text": "Valid 07/24 - 07/30"
+}

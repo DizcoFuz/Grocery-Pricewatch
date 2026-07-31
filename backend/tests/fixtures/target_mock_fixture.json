@@ -1,0 +1,92 @@
+{
+  "_mock_note": "Mock fixture — represents expected Flipp API + Target RedSky Circle API response format. Not yet verified against live endpoint.",
+  "flyers_response": [
+    {
+      "id": 334455,
+      "merchant_name": "Target",
+      "name": "Target Weekly Ad",
+      "category": "grocery",
+      "valid_from": "2024-01-01T00:00:00Z",
+      "valid_to": "2030-12-31T23:59:59Z",
+      "thumbnail_url": "https://cdn.flipp.com/target/weekly.jpg",
+      "store_id": 60601
+    }
+  ],
+  "flyer_details": {
+    "334455": {
+      "id": 334455,
+      "name": "Target Weekly Ad",
+      "merchant_name": "Target",
+      "valid_from": "2024-01-01T00:00:00Z",
+      "valid_to": "2030-12-31T23:59:59Z",
+      "flyer_items": [
+        {
+          "name": "Good & Gather Organic Bananas, 1 lb",
+          "current_price": 0.79,
+          "original_price": 0.99,
+          "sale_story": "Save $0.20",
+          "display_type": 1,
+          "brand": "Good & Gather",
+          "size": "1 lb",
+          "cutout_image_url": "https://cdn.flipp.com/target/bananas.jpg"
+        },
+        {
+          "name": "Good & Gather Whole Milk, 1 gallon",
+          "current_price": 3.49,
+          "sale_story": "Weekly ad price",
+          "display_type": 1,
+          "brand": "Good & Gather",
+          "size": "1 gallon",
+          "cutout_image_url": "https://cdn.flipp.com/target/milk.jpg"
+        },
+        {
+          "name": "Market Pantry Large Eggs, 12 ct",
+          "current_price": 2.29,
+          "original_price": 3.29,
+          "sale_story": "Save $1.00",
+          "display_type": 1,
+          "brand": "Market Pantry",
+          "size": "12 count",
+          "cutout_image_url": "https://cdn.flipp.com/target/eggs.jpg"
+        },
+        {
+          "name": "Target Circle Banner",
+          "display_type": 5,
+          "current_price": 0,
+          "sale_story": "",
+          "cutout_image_url": "https://cdn.flipp.com/target/banner.jpg"
+        }
+      ]
+    }
+  },
+  "circle_response": {
+    "offers": [
+      {
+        "title": "Good & Gather Organic Milk",
+        "brand": "Good & Gather",
+        "size": "1 gallon",
+        "price": 2.99,
+        "percentage": 20
+      },
+      {
+        "title": "Market Pantry Chicken Breast",
+        "brand": "Market Pantry",
+        "size": "1 lb",
+        "price": 1.50,
+        "discountPercent": 15
+      },
+      {
+        "title": "Simply Balanced Frozen Vegetables",
+        "brand": "Simply Balanced",
+        "size": "12 oz",
+        "value": 1.00
+      },
+      {
+        "title": "Archer Farms Trail Mix",
+        "brand": "Archer Farms",
+        "size": "10 oz",
+        "price": 2.00
+      }
+    ]
+  }
+}

@@ -1,0 +1,80 @@
+{
+  "_mock_note": "Mock fixture — represents expected Flipp API response format for Jewel-Osco. Not yet verified against live endpoint.",
+  "flyers_response": [
+    {
+      "id": 892341,
+      "merchant_name": "Jewel-Osco",
+      "name": "Jewel-Osco Weekly Ad",
+      "category": "grocery",
+      "valid_from": "2024-01-01T00:00:00Z",
+      "valid_to": "2030-12-31T23:59:59Z",
+      "thumbnail_url": "https://cdn.flipp.com/jewel/weekly.jpg",
+      "store_id": 60601
+    }
+  ],
+  "flyer_details": {
+    "892341": {
+      "id": 892341,
+      "name": "Jewel-Osco Weekly Ad",
+      "merchant_name": "Jewel-Osco",
+      "valid_from": "2024-01-01T00:00:00Z",
+      "valid_to": "2030-12-31T23:59:59Z",
+      "flyer_items": [
+        {
+          "name": "Driscoll's Strawberries, 1 lb",
+          "current_price": 3.99,
+          "original_price": 5.99,
+          "sale_story": "Save $2.00",
+          "display_type": 1,
+          "brand": "Driscoll's",
+          "size": "1 lb",
+          "cutout_image_url": "https://cdn.flipp.com/jewel/strawberries.jpg"
+        },
+        {
+          "name": "O Organics Whole Milk, 1 gallon",
+          "current_price": 3.49,
+          "sale_story": "Weekly ad price",
+          "display_type": 1,
+          "brand": "O Organics",
+          "size": "1 gallon",
+          "cutout_image_url": "https://cdn.flipp.com/jewel/milk.jpg"
+        },
+        {
+          "name": "Coca-Cola, 12 pack 12 oz cans",
+          "current_price": 6.99,
+          "original_price": 8.99,
+          "sale_story": "Buy 2 for $12.00",
+          "display_type": 1,
+          "brand": "Coca-Cola",
+          "size": "12 pack",
+          "cutout_image_url": "https://cdn.flipp.com/jewel/coke.jpg"
+        },
+        {
+          "name": "Cheerios Cereal, 10.8 oz box",
+          "current_price": 2.50,
+          "sale_story": "Buy One Get One Free",
+          "display_type": 1,
+          "brand": "Cheerios",
+          "size": "10.8 oz",
+          "cutout_image_url": "https://cdn.flipp.com/jewel/cheerios.jpg"
+        },
+        {
+          "name": "Signature Cafe Rotisserie Chicken",
+          "current_price": 7.99,
+          "sale_story": "Weekly ad price",
+          "display_type": 1,
+          "brand": "Signature Cafe",
+          "size": "each",
+          "cutout_image_url": "https://cdn.flipp.com/jewel/chicken.jpg"
+        },
+        {
+          "name": "Safeway Sign-Up Bonus",
+          "display_type": 5,
+          "current_price": 0,
+          "sale_story": "",
+          "cutout_image_url": "https://cdn.flipp.com/jewel/promo.jpg"
+        }
+      ]
+    }
+  }
+}

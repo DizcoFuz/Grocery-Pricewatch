@@ -384,13 +384,17 @@ def _register_routes(app: FastAPI) -> None:
     # ===================================================================
 
     @app.post("/api/items/import/csv", response_model=ItemImportResult, tags=["Items Import"])
-    def import_items_csv(file: UploadFile = File(...), db: Session = Depends(get_db)):
+    def import_items_csv(file: UploadFile = File(...), dry_run: bool = Query(False), db: Session = Depends(get_db)):
         content = file.file.read().decode("utf-8-sig")
-        return crud.import_items_csv(db, content)
+        return crud.import_items_csv(db, content, dry_run=dry_run)
 
     @app.post("/api/items/import/json", response_model=ItemImportResult, tags=["Items Import"])
-    def import_items_json(json_body: list[dict[str, Any]] = Body(...), db: Session = Depends(get_db)):
-        return crud.import_items_json(db, json.dumps(json_body))
+    def import_items_json(
+        json_body: list[dict[str, Any]] = Body(...),
+        dry_run: bool = Query(False),
+        db: Session = Depends(get_db),
+    ):
+        return crud.import_items_json(db, json.dumps(json_body), dry_run=dry_run)
 
     @app.get("/api/items/export/csv", response_class=PlainTextResponse, tags=["Items Export"])
     def export_items_csv(db: Session = Depends(get_db)):
