@@ -25,6 +25,9 @@ npm-debug.log*
 # Temp/debug scripts
 backend/_*.py
 backend/test_imports.py
+backend/tests/test_debug.py
+backend/tests/test_debug2.py
+backend/_verify*.py
 
 # IDE
 .vscode/

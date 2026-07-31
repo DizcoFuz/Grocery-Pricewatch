@@ -9,3 +9,4 @@ rapidfuzz==3.11.0
 python-multipart==0.0.20
 python-dateutil==2.9.0.post0
 pytest>=8.0  # test/dev dependency (P0-7)
+pytest-asyncio>=0.24  # async test support for adapter tests (N-1)
