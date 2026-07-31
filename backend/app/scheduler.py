@@ -286,6 +286,10 @@ def refresh_store(db: Session, store_id: int) -> StoreRefreshResult:
             final_status = "partial"
 
         crud.update_store_status(db, store.id, final_status, fetched_at=datetime.now(timezone.utc))
+        logger.info(
+            "Store '%s': status updated to '%s', fetch_at=%s",
+            store.name, final_status, datetime.now(timezone.utc).isoformat(),
+        )
         return StoreRefreshResult(
             store_id=store.id,
             store_name=store.name,
