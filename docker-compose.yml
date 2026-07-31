@@ -21,7 +21,7 @@ services:
       - DEFAULT_ZIP=${DEFAULT_ZIP:-60601}
     depends_on:
       tesseract:
-        condition: service_healthy
+        condition: service_started
       browserless:
         condition: service_started
     healthcheck:
@@ -40,24 +40,12 @@ services:
       - TIMEOUT=60000
       - MAX_CONCURRENT_SESSIONS=2
     shm_size: 1g
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/"]
-      interval: 30s
-      timeout: 10s
-      start_period: 10s
-      retries: 3
 
   # ── Tesseract OCR server for image/PDF circulars (Woodman's) ─
   tesseract:
     image: hertzg/tesseract-server:latest
     container_name: grocery-tesseract
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8884/"]
-      interval: 30s
-      timeout: 10s
-      start_period: 5s
-      retries: 3
 
 volumes:
   grocery-data:
