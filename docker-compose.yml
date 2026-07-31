@@ -1,6 +1,6 @@
 # Grocery Pricewatch — full stack
 # Usage:  docker compose up -d --build
-# App:    http://localhost:${APP_PORT:-8000}
+# App:    http://localhost:${APP_PORT:-9010}
 
 services:
   app:
@@ -10,7 +10,7 @@ services:
     container_name: grocery-app
     restart: unless-stopped
     ports:
-      - "${APP_PORT:-8000}:8000"
+      - "${APP_PORT:-9010}:8000"
     volumes:
       - grocery-data:/data
     env_file:

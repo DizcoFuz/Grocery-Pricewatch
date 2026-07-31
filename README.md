@@ -111,7 +111,7 @@ All settings are in the DB (editable via UI Settings page) or `.env`:
 
 | Setting | Env Var | Default | Description |
 |---------|---------|---------|-------------|
-| Port | `APP_PORT` | `8000` | HTTP port |
+| Port | `APP_PORT` | `9010` | HTTP port (docker01 range 9001-9049) |
 | Default ZIP | `DEFAULT_ZIP` | `60601` | ZIP code for initial store seeding (editable per-store in UI) |
 | Password | `APP_PASSWORD` | (blank) | Shared password for hosted deployments |
 | Refresh time | `REFRESH_TIME` | `07:00` | Daily refresh time |
