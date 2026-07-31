@@ -597,9 +597,12 @@ def review_match(db: Session, match_id: int, decision: str) -> Match | None:
 
     # Persist a MatchRule keyed on (item_id, normalized offer text) so future
     # cycles auto-apply this decision (FR-3.2).
+    # NOTE: must use the SAME source of truth as process_matches
+    # (product_name first, then raw_text) or the rule key won't match
+    # on the next refresh and the same match reappears.
     offer = db.get(Offer, match.offer_id) if match.offer_id else None
     if offer is not None:
-        normalized = normalize_offer_text(offer.raw_text or offer.product_name or "")
+        normalized = normalize_offer_text(offer.product_name or offer.raw_text or "")
         if normalized:
             create_match_rule(db, item_id=match.item_id, normalized_offer_text=normalized, decision=rule_decision)
 

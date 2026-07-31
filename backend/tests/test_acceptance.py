@@ -544,6 +544,42 @@ def test_c8_reject_uncertain_keeps_best_unchanged(client, db):
     assert entry["current_best_price"] == 349
 
 
+def test_rejected_match_rule_persists_across_refresh(client, db):
+    """FR-3.2: rejecting a match must suppress the same offer next refresh.
+
+    Regression test: the MatchRule key must use the same source of truth as
+    process_matches (product_name first, then raw_text) or the rejected
+    match reappears on every refresh.
+    """
+    from app.matching import process_matches
+    from app.crud import review_match, get_store_by_adapter_key
+
+    item = _create_item(db, name="White Mushrooms", uom="ea",
+                        keywords=["mushroom"], baseline=300)
+    s1 = _enable_store(db, "aldi")
+
+    # Cycle 1: offer with product_name (like Flipp) + generic raw_text
+    c1 = _create_cycle(db, s1)
+    o1 = _create_offer(db, c1, raw_text="Weekly ad price", price=199,
+                       price_per_item=199, product_name="White Mushrooms 8 oz")
+    m1 = _create_match(db, o1, item, status=MatchStatus.uncertain, confidence=60.0)
+
+    # Reject it → creates a MatchRule
+    review_match(db, m1.id, "reject")
+
+    # Cycle 2 (next refresh): same offer text, new cycle — the upsert
+    # deletes the old offers, so process_matches runs fresh.
+    c2 = _create_cycle(db, s1)
+    o2 = _create_offer(db, c2, raw_text="Weekly ad price", price=199,
+                       price_per_item=199, product_name="White Mushrooms 8 oz")
+
+    created = process_matches(db, c2.id)
+    assert created == 0, (
+        f"Rejected match reappeared after refresh: {created} matches created. "
+        "MatchRule key mismatch between review_match and process_matches."
+    )
+
+
 # =========================================================================== #
 # Criterion 9: Cumulative savings persists across app restarts.
 # =========================================================================== #
