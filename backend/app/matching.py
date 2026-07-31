@@ -585,6 +585,11 @@ def process_matches(
             "process_matches: items=%s",
             [i.name for i in items],
         )
+    if offers:
+        logger.info(
+            "process_matches: first 5 offer product_names=%s",
+            [o.product_name for o in offers[:5]],
+        )
 
     created = 0
 
@@ -597,7 +602,11 @@ def process_matches(
         ).delete(synchronize_session="fetch")
 
     for offer in offers:
-        offer_text = offer.raw_text or offer.product_name
+        # Use product_name as the primary match text since raw_text from
+        # Flipp adapters is often just "Weekly ad price" — not the product.
+        offer_text = offer.product_name or offer.raw_text
+        if not offer_text:
+            continue
         normalized_offer = normalize_offer_text(offer_text)
         for item in items:
             # --- MatchRule check (FR-3.2) ---
