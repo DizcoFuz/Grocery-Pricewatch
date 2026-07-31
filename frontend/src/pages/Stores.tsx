@@ -125,7 +125,9 @@ function StoreCard({
         {/* Name + adapter */}
         <div className="min-w-0 flex-1">
           <p className="font-semibold text-gray-900">{store.name}</p>
-          <p className="text-xs text-gray-400 uppercase tracking-wide">{store.adapter_key}</p>
+          <p className="text-xs text-gray-400">
+            {store.adapter_key} · ZIP: {store.zip_or_store_id || 'not set'}
+          </p>
         </div>
 
         {/* Status badge */}
@@ -145,6 +147,15 @@ function StoreCard({
         >
           <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} />
           {refreshing ? 'Fetching…' : 'Refresh'}
+        </button>
+
+        {/* Edit */}
+        <button
+          onClick={onEditToggle}
+          className="px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100 rounded-lg font-medium"
+          title="Edit store settings"
+        >
+          {editing ? 'Close' : 'Edit'}
         </button>
 
         {/* Expand logs */}
