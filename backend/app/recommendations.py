@@ -550,9 +550,13 @@ def compute_best_prices(db: Session) -> BestPricesResponse:
         current_candidates: list[tuple[int, int, str, Offer, Store, bool]] = []
         # (price, store_id, deal_type, offer, store, approximate)
         enabled_store_ids = {s.id for s in stores}
+        # Look at cycles whose period_end >= today (still valid/current)
         today_cycles = (
             db.query(AdCycle)
-            .filter(AdCycle.period_start == today, AdCycle.store_id.in_(enabled_store_ids))
+            .filter(
+                AdCycle.period_end >= today,
+                AdCycle.store_id.in_(enabled_store_ids),
+            )
             .all()
         )
         for cycle in today_cycles:
@@ -562,7 +566,11 @@ def compute_best_prices(db: Session) -> BestPricesResponse:
                 .filter(
                     Offer.ad_cycle_id == cycle.id,
                     Match.item_id == item.id,
-                    Match.status.in_([MatchStatus.confident, MatchStatus.accepted]),
+                    Match.status.in_([
+                        MatchStatus.confident,
+                        MatchStatus.accepted,
+                        MatchStatus.uncertain,
+                    ]),
                 )
                 .all()
             )

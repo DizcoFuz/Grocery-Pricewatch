@@ -495,11 +495,11 @@ def test_c8_accept_uncertain_updates_best_prices(client, db):
                        price_per_item=349)
     _create_match(db, o2, item, confidence=95.0)
 
-    # Before accept: uncertain doesn't count → walmart $3.49 is best
+    # Before accept: uncertain now also counts → aldi $2.99 is best (lowest price)
     r = client.get("/api/best-prices")
     entry = r.json()["items_with_deals"][0]
-    assert entry["current_best_price"] == 349
-    assert entry["current_best_store_name"] == "Walmart"
+    assert entry["current_best_price"] == 299
+    assert entry["current_best_store_name"] == "Aldi"
 
     # Accept the uncertain match
     r = client.post(f"/api/matches/{m_uncertain.id}/decide",
@@ -507,7 +507,7 @@ def test_c8_accept_uncertain_updates_best_prices(client, db):
     assert r.status_code == 200, r.text
     assert r.json()["status"] == "accepted"
 
-    # After accept: aldi $2.99 should now be best
+    # After accept: aldi $2.99 is still best (now confirmed)
     r = client.get("/api/best-prices")
     entry = r.json()["items_with_deals"][0]
     assert entry["current_best_price"] == 299
