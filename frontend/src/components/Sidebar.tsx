@@ -93,7 +93,8 @@ export default function Sidebar({ open, onClose, reviewCount }: SidebarProps) {
 
         {/* Footer */}
         <div className="px-4 py-3 border-t border-gray-200 text-xs text-gray-400">
-          v1.0 · <a href="https://hermes-agent.nousresearch.com" className="hover:text-gray-600">Hermes</a>
+          v{__APP_VERSION__} · {__APP_BUILD_DATE__} ·{' '}
+          <a href="https://hermes-agent.nousresearch.com" className="hover:text-gray-600">Hermes</a>
         </div>
       </aside>
     </>
