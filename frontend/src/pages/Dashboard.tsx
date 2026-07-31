@@ -7,12 +7,15 @@ import {
   AlertCircle,
   ClipboardCheck,
   ArrowRight,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react'
 import { Link } from 'react-router-dom'
-import { getDashboard, refreshAll } from '../api'
-import type { DashboardResponse, DashboardBestDeal, StoreStatus as StoreStatusRow } from '../types'
+import { getDashboard, refreshAll, getRefreshAllStatus } from '../api'
+import type { DashboardResponse, DashboardBestDeal, StoreStatus as StoreStatusRow, BestPriceEntry } from '../types'
 import { formatCents, relativeTime } from '../types'
 import StoreStatusBadge from '../components/StoreStatusBadge'
+import PriceDelta from '../components/PriceDelta'
 
 export default function Dashboard() {
   const qc = useQueryClient()
@@ -26,11 +29,25 @@ export default function Dashboard() {
   const refreshMut = useMutation({
     mutationFn: refreshAll,
     onMutate: () => setRefreshing(true),
-    onSettled: () => {
+    onSuccess: async () => {
+      // Poll the background status until the refresh finishes
+      const poll = async () => {
+        for (let i = 0; i < 60; i++) {
+          await new Promise((r) => setTimeout(r, 2000))
+          const status = await getRefreshAllStatus()
+          if (!status.running) {
+            break
+          }
+        }
+        setRefreshing(false)
+        qc.invalidateQueries({ queryKey: ['dashboard'] })
+        qc.invalidateQueries({ queryKey: ['review-queue'] })
+        qc.invalidateQueries({ queryKey: ['recommendations'] })
+      }
+      poll()
+    },
+    onError: () => {
       setRefreshing(false)
-      qc.invalidateQueries({ queryKey: ['dashboard'] })
-      qc.invalidateQueries({ queryKey: ['review-queue'] })
-      qc.invalidateQueries({ queryKey: ['recommendations'] })
     },
   })
 
@@ -81,6 +98,14 @@ export default function Dashboard() {
         </Link>
       )}
 
+      {/* Failure banner */}
+      {data.banner && (
+        <div className="flex items-center gap-3 px-4 py-3 bg-red-50 border border-red-200 rounded-lg">
+          <AlertCircle className="text-red-600 shrink-0" size={20} />
+          <span className="text-sm font-medium text-red-800">{data.banner}</span>
+        </div>
+      )}
+
       {/* Headline savings card */}
       <HeadlineCard data={data} />
 
@@ -89,6 +114,16 @@ export default function Dashboard() {
 
       {/* Best-deals table */}
       <BestDealsTable data={data} />
+
+      {/* Best prices with delta (FR-4.2) */}
+      {data.best_prices && data.best_prices.items_with_deals.length > 0 && (
+        <BestPricesTable entries={data.best_prices.items_with_deals} />
+      )}
+
+      {/* No deals this week (FR-4.3) */}
+      {data.best_prices && data.best_prices.items_without_deals.length > 0 && (
+        <NoDealsSection entries={data.best_prices.items_without_deals} />
+      )}
 
       {refreshMut.isError && (
         <div className="flex items-center gap-2 text-sm text-red-600">
@@ -224,6 +259,154 @@ function BestDealsTable({ data }: { data: DashboardResponse }) {
                     <span className="text-xs font-semibold text-deal-best">
                       {formatCents(row.savings_vs_baseline)}
                     </span>
+                  </Td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Best prices table with delta (FR-4.2) ─────────────────────
+function BestPricesTable({ entries }: { entries: BestPriceEntry[] }) {
+  const [expanded, setExpanded] = useState<number | null>(null)
+
+  return (
+    <div>
+      <h2 className="text-sm font-semibold text-gray-600 mb-2 uppercase tracking-wide">
+        Price comparison — current vs. last best
+      </h2>
+      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="min-w-full divide-y divide-gray-200">
+            <thead className="bg-gray-50">
+              <tr>
+                <Th>Item</Th>
+                <Th className="text-right">Current best</Th>
+                <Th>Store</Th>
+                <Th className="text-right">Last best</Th>
+                <Th>Delta</Th>
+                <Th className="text-right">All-time best</Th>
+                <Th>{''}</Th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {entries.map((entry: BestPriceEntry) => (
+                <>
+                  <tr
+                    key={entry.item_id}
+                    className="hover:bg-gray-50 cursor-pointer"
+                    onClick={() => setExpanded(expanded === entry.item_id ? null : entry.item_id)}
+                  >
+                    <Td>
+                      <div className="font-medium text-gray-900">{entry.item_name}</div>
+                      {entry.category && (
+                        <div className="text-xs text-gray-400">{entry.category}</div>
+                      )}
+                    </Td>
+                    <Td className="text-right">
+                      <span className="font-semibold text-gray-900">
+                        {formatCents(entry.current_best_price)}
+                      </span>
+                      {entry.unit_price_unknown && (
+                        <span className="ml-1 text-xs text-amber-600">≈</span>
+                      )}
+                    </Td>
+                    <Td>
+                      <span className="text-sm text-gray-700">{entry.current_best_store_name}</span>
+                    </Td>
+                    <Td className="text-right">
+                      <span className="text-sm text-gray-500">
+                        {formatCents(entry.last_best_price)}
+                      </span>
+                      {entry.last_best_week && (
+                        <div className="text-xs text-gray-400">{entry.last_best_week}</div>
+                      )}
+                    </Td>
+                    <Td>
+                      <PriceDelta
+                        deltaCents={entry.delta_cents}
+                        direction={entry.delta_direction as 'better' | 'worse' | 'unchanged' | 'new'}
+                      />
+                    </Td>
+                    <Td className="text-right">
+                      <span className="text-xs text-gray-500">
+                        {formatCents(entry.all_time_best_price)}
+                      </span>
+                      {entry.all_time_best_store_name && (
+                        <div className="text-xs text-gray-400">{entry.all_time_best_store_name}</div>
+                      )}
+                    </Td>
+                    <Td>
+                      {entry.other_store_prices.length > 0 && (
+                        <button className="text-gray-400 hover:text-gray-600">
+                          {expanded === entry.item_id ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                        </button>
+                      )}
+                    </Td>
+                  </tr>
+                  {expanded === entry.item_id && entry.other_store_prices.length > 0 && (
+                    <tr key={`${entry.item_id}-expanded`} className="bg-gray-50">
+                      <td colSpan={7} className="px-8 py-3">
+                        <div className="text-xs font-semibold text-gray-500 uppercase mb-2">
+                          Other stores this week
+                        </div>
+                        <div className="space-y-1">
+                          {entry.other_store_prices.map((sp, j) => (
+                            <div key={j} className="flex items-center gap-4 text-sm">
+                              <span className="text-gray-700 min-w-[120px]">{sp.store_name}</span>
+                              <span className="font-medium text-gray-900">{formatCents(sp.price)}</span>
+                              <span className="text-xs text-gray-400">{sp.deal_type}</span>
+                              {sp.unit_price_unknown && (
+                                <span className="text-xs text-amber-600">≈</span>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── No deals this week (FR-4.3) ────────────────────────────────
+function NoDealsSection({ entries }: { entries: BestPriceEntry[] }) {
+  return (
+    <div>
+      <h2 className="text-sm font-semibold text-gray-600 mb-2 uppercase tracking-wide">
+        No deals this week
+      </h2>
+      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="min-w-full divide-y divide-gray-200">
+            <tbody className="divide-y divide-gray-100">
+              {entries.map((entry: BestPriceEntry) => (
+                <tr key={entry.item_id} className="hover:bg-gray-50">
+                  <Td>
+                    <div className="font-medium text-gray-700">{entry.item_name}</div>
+                    {entry.category && (
+                      <div className="text-xs text-gray-400">{entry.category}</div>
+                    )}
+                  </Td>
+                  <Td className="text-right">
+                    <span className="text-sm text-gray-500">
+                      Last best: {formatCents(entry.last_best_price)}
+                    </span>
+                    {entry.last_best_store_name && (
+                      <span className="text-xs text-gray-400 ml-2">
+                        @ {entry.last_best_store_name}
+                      </span>
+                    )}
                   </Td>
                 </tr>
               ))}

@@ -14,11 +14,13 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass, field
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
+from urllib.robotparser import RobotFileParser
 
 import httpx
 
@@ -217,29 +219,54 @@ class StoreAdapter(ABC):
 
     # -- robots.txt ----------------------------------------------------------
 
-    async def check_robots_txt(self, base_url: str) -> bool:
-        """Best-effort robots.txt check.
+    _robots_cache: dict[str, RobotFileParser] = {}
 
-        Returns ``True`` if the path is allowed (or if robots.txt is
-        unreachable).  ``False`` if explicitly disallowed.
+    async def check_robots_txt(self, url: str) -> bool:
+        """Check if ``url`` is allowed by the site's robots.txt (RFC 9309).
+
+        Uses :class:`urllib.robotparser.RobotFileParser`.  Returns ``True``
+        if the path is allowed, or if robots.txt is unreachable/unparseable
+        (fail-open).  Parsed robots.txt files are cached per-host.
         """
         try:
-            async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
-                resp = await client.get(
-                    base_url.rstrip("/").rsplit("/", 1)[0] + "/robots.txt"
-                    if "/" in base_url[8:]
-                    else base_url.rstrip("/") + "/robots.txt"
-                )
-                if resp.status_code != 200:
-                    return True  # no robots.txt → assume allowed
-                # very naive parse — full RFC 9309 parser is overkill here
-                for line in resp.text.splitlines():
-                    line = line.strip()
-                    if line.lower().startswith("disallow: /"):
-                        return False
-            return True
-        except httpx.RequestError:
-            return True  # can't fetch → don't block
+            from urllib.parse import urlsplit, urlunsplit
+
+            parts = urlsplit(url)
+            if not parts.scheme or not parts.netloc:
+                return True
+            host_key = f"{parts.scheme}://{parts.netloc}"
+
+            if host_key not in self._robots_cache:
+                rp = RobotFileParser()
+                rp.set_url(urlunsplit((parts.scheme, parts.netloc, "/robots.txt", "", "")))
+                # Fetch the robots.txt ourselves (async) then feed the parser,
+                # because RobotFileParser.read() is blocking.
+                try:
+                    async with httpx.AsyncClient(
+                        timeout=10, follow_redirects=True
+                    ) as client:
+                        rresp = await client.get(
+                            f"{host_key}/robots.txt",
+                            headers={
+                                "User-Agent": (
+                                    "GroceryPricewatchBot/1.0 "
+                                    "(+https://github.com/example/grocery-pricewatch)"
+                                )
+                            },
+                        )
+                        if rresp.status_code == 200:
+                            rp.parse(rresp.text.splitlines())
+                        else:
+                            rp.parse([])  # treat as empty → allow all
+                except httpx.RequestError:
+                    rp.parse([])  # can't fetch → allow all (fail-open)
+                self._robots_cache[host_key] = rp
+
+            rp = self._robots_cache[host_key]
+            ua = "GroceryPricewatchBot"
+            return rp.can_fetch(ua, url)
+        except Exception:
+            return True  # fail-open on any unexpected error
 
     # -- price / size parsing utilities --------------------------------------
 
@@ -270,3 +297,103 @@ class StoreAdapter(ABC):
         if not m:
             return 0
         return StoreAdapter.dollars_to_cents(m.group(1))
+
+
+# --------------------------------------------------------------------------- #
+# Browserless client — drives the browserless/chromium container
+# --------------------------------------------------------------------------- #
+
+
+class BrowserClient:
+    """Drives the browserless/chromium container for JS-rendered pages.
+
+    The browserless service exposes a simple HTTP API.  We use the
+    ``/content`` endpoint (POST with a JSON body) to get rendered HTML,
+    and ``/screenshot`` for image captures.  Falls back to ``None`` on
+    any failure so callers can try a direct httpx fetch as a last resort.
+
+    Configured via the ``BROWSER_URL`` env var (default
+    ``http://browserless:3000``, matching docker-compose.yml).
+    """
+
+    def __init__(self) -> None:
+        self.base_url = os.environ.get("BROWSER_URL", "http://browserless:3000").rstrip("/")
+
+    async def render_page(
+        self,
+        url: str,
+        wait_for: str = "networkidle",
+        timeout: int = 30000,
+    ) -> str | None:
+        """Use the browserless ``/content`` endpoint to get rendered HTML.
+
+        Args:
+            url: The page URL to render.
+            wait_for: Puppeteer ``waitUntil`` option (``networkidle``,
+                ``load``, ``domcontentloaded``).
+            timeout: Render timeout in milliseconds.
+
+        Returns:
+            The rendered HTML as a string, or ``None`` on failure.
+        """
+        endpoint = f"{self.base_url}/content"
+        body = {
+            "url": url,
+            "waitUntil": wait_for,
+            "timeout": timeout,
+        }
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "text/html, */*",
+            "User-Agent": (
+                "GroceryPricewatchBot/1.0 "
+                "(+https://github.com/example/grocery-pricewatch)"
+            ),
+        }
+        try:
+            async with httpx.AsyncClient(timeout=60) as client:
+                resp = await client.post(endpoint, json=body, headers=headers)
+                if resp.status_code == 200:
+                    return resp.text
+                logger.warning(
+                    "browserless: /content returned %d for %s",
+                    resp.status_code,
+                    url,
+                )
+                return None
+        except httpx.RequestError as exc:
+            logger.warning("browserless: /content request error for %s: %s", url, exc)
+            return None
+
+    async def screenshot(
+        self, url: str, wait_for: str = "networkidle", timeout: int = 30000
+    ) -> bytes | None:
+        """Use the browserless ``/screenshot`` endpoint.
+
+        Returns PNG image bytes, or ``None`` on failure.
+        """
+        endpoint = f"{self.base_url}/screenshot"
+        body = {
+            "url": url,
+            "waitUntil": wait_for,
+            "timeout": timeout,
+            "type": "png",
+        }
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "image/png, */*",
+        }
+        try:
+            async with httpx.AsyncClient(timeout=60) as client:
+                resp = await client.post(endpoint, json=body, headers=headers)
+                if resp.status_code == 200:
+                    return resp.content
+                logger.warning(
+                    "browserless: /screenshot returned %d for %s",
+                    resp.status_code,
+                    url,
+                )
+                return None
+        except httpx.RequestError as exc:
+            logger.warning("browserless: /screenshot error for %s: %s", url, exc)
+            return None

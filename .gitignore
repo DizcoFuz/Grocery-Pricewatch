@@ -22,6 +22,10 @@ npm-debug.log*
 *.db-shm
 /data/
 
+# Temp/debug scripts
+backend/_*.py
+backend/test_imports.py
+
 # IDE
 .vscode/
 .idea/
@@ -32,3 +36,4 @@ npm-debug.log*
 # OS
 .DS_Store
 Thumbs.db
+.pytest_cache/

@@ -251,6 +251,40 @@ export interface DashboardResponse {
   store_statuses: StoreStatus[]
   review_queue_count: number
   last_report: WeeklyReportRead | null
+  banner: string | null
+  best_prices: BestPricesResponse | null
+}
+
+// ── Best Prices (FR-4.2, FR-4.3) ──────────────────────────────
+
+export interface BestPriceEntry {
+  item_id: number
+  item_name: string
+  category: string
+  current_best_price: number | null   // cents
+  current_best_store_id: number | null
+  current_best_store_name: string
+  current_best_deal_type: string
+  last_best_price: number | null      // cents
+  last_best_store_name: string
+  last_best_week: string               // ISO date
+  delta_cents: number | null          // negative = cheaper (better)
+  delta_direction: '' | 'better' | 'worse' | 'unchanged' | 'new'
+  all_time_best_price: number | null  // cents
+  all_time_best_store_name: string
+  all_time_best_week: string
+  other_store_prices: Array<{
+    store_name: string
+    price: number
+    deal_type: string
+    unit_price_unknown: boolean
+  }>
+  unit_price_unknown: boolean
+}
+
+export interface BestPricesResponse {
+  items_with_deals: BestPriceEntry[]
+  items_without_deals: BestPriceEntry[]
 }
 
 // ── Shopping list ────────────────────────────────────────────

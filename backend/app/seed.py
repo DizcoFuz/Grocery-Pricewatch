@@ -74,7 +74,7 @@ def seed_stores(db: Session) -> int:
             name=store_data["name"],
             adapter_key=store_data["adapter_key"],
             zip_or_store_id=store_data["zip_or_store_id"],
-            enabled=True,
+            enabled=False,
         )
         db.add(store)
         created += 1

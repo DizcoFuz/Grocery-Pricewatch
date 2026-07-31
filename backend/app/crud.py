@@ -15,7 +15,7 @@ from __future__ import annotations
 import csv
 import io
 import json
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import Any
 
 from sqlalchemy import delete, select
@@ -26,6 +26,7 @@ from app.models import (
     Item,
     Match,
     MatchDecidedBy,
+    MatchRule,
     MatchStatus,
     Offer,
     PriceHistory,
@@ -96,7 +97,7 @@ def update_store_status(
     if store is None:
         return
     store.last_fetch_status = status
-    store.last_fetch_at = fetched_at or datetime.utcnow()
+    store.last_fetch_at = fetched_at or datetime.now(timezone.utc)
     db.commit()
 
 
@@ -546,18 +547,96 @@ def review_match(db: Session, match_id: int, decision: str) -> Match | None:
     """Accept or reject a match.
 
     decision: "accept" or "reject"
+
+    Also persists a MatchRule (FR-3.2) so the same offer text in future
+    cycles auto-applies the decision.
     """
+    from app.matching import normalize_offer_text
+
     match = db.get(Match, match_id)
     if match is None:
         return None
     if decision == "accept":
         match.status = MatchStatus.accepted
+        rule_decision = "accepted"
     else:
         match.status = MatchStatus.rejected
+        rule_decision = "rejected"
     match.decided_by = MatchDecidedBy.user
     db.commit()
     db.refresh(match)
+
+    # Persist a MatchRule keyed on (item_id, normalized offer text) so future
+    # cycles auto-apply this decision (FR-3.2).
+    offer = db.get(Offer, match.offer_id) if match.offer_id else None
+    if offer is not None:
+        normalized = normalize_offer_text(offer.raw_text or offer.product_name or "")
+        if normalized:
+            create_match_rule(db, item_id=match.item_id, normalized_offer_text=normalized, decision=rule_decision)
+
+    db.refresh(match)
     return match
+
+
+# ============================================================================
+# MatchRule (FR-3.2)
+# ============================================================================
+
+
+def create_match_rule(
+    db: Session,
+    item_id: int,
+    normalized_offer_text: str,
+    decision: str,
+) -> MatchRule:
+    """Upsert a MatchRule for (item_id, normalized_offer_text).
+
+    If a rule already exists for this key, update its decision; otherwise create
+    a new one.
+    """
+    existing = (
+        db.query(MatchRule)
+        .filter(
+            MatchRule.item_id == item_id,
+            MatchRule.normalized_offer_text == normalized_offer_text,
+        )
+        .first()
+    )
+    if existing is not None:
+        existing.decision = decision
+        db.commit()
+        db.refresh(existing)
+        return existing
+    rule = MatchRule(
+        item_id=item_id,
+        normalized_offer_text=normalized_offer_text,
+        decision=decision,
+    )
+    db.add(rule)
+    db.commit()
+    db.refresh(rule)
+    return rule
+
+
+def get_match_rule(
+    db: Session,
+    item_id: int,
+    normalized_offer_text: str,
+) -> MatchRule | None:
+    """Check if a MatchRule exists for (item_id, normalized_offer_text)."""
+    return (
+        db.query(MatchRule)
+        .filter(
+            MatchRule.item_id == item_id,
+            MatchRule.normalized_offer_text == normalized_offer_text,
+        )
+        .first()
+    )
+
+
+def get_match_rules_for_item(db: Session, item_id: int) -> list[MatchRule]:
+    """Get all MatchRules for an item."""
+    return list(db.query(MatchRule).filter(MatchRule.item_id == item_id).all())
 
 
 def count_uncertain(db: Session) -> int:

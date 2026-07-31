@@ -10,7 +10,10 @@
 from __future__ import annotations
 
 import logging
-from datetime import date, datetime, timedelta
+import os
+import time
+from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any
 
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -93,6 +96,42 @@ def _run_adapter(store: Store) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     return raw_offers, metadata
 
 
+# ---------------------------------------------------------------------------#
+# Stale status computation (FR-1.4)
+# ---------------------------------------------------------------------------#
+
+
+def compute_stale_status(
+    last_fetch_at: datetime | None,
+    last_fetch_status: str | None,
+    period_end: date | None = None,
+) -> str:
+    """Compute the effective store status at read time.
+
+    Rules:
+    - If the stored status is ``failed`` or ``partial``, keep it as-is.
+    - If the stored status is ``ok`` but ``last_fetch_at`` is older than 24h
+      or the ad ``period_end`` is before today, return ``stale``.
+    - If no fetch has ever happened, return ``stale``.
+    - Otherwise return the stored status.
+    """
+    if last_fetch_status in ("failed", "partial"):
+        return last_fetch_status
+    if last_fetch_at is None:
+        return "stale"
+    if last_fetch_status == "ok":
+        now = datetime.now(timezone.utc)
+        # Handle both tz-aware and tz-naive datetimes stored in the DB
+        fetch_dt = last_fetch_at
+        if fetch_dt.tzinfo is None:
+            fetch_dt = fetch_dt.replace(tzinfo=timezone.utc)
+        if (now - fetch_dt) > timedelta(hours=24):
+            return "stale"
+        if period_end is not None and period_end < date.today():
+            return "stale"
+    return last_fetch_status or "stale"
+
+
 # ---------------------------------------------------------------------------
 # Refresh logic
 # ---------------------------------------------------------------------------
@@ -108,7 +147,7 @@ def refresh_store(db: Session, store_id: int) -> StoreRefreshResult:
         return StoreRefreshResult(
             store_id=store_id,
             store_name="unknown",
-            status="error",
+            status="failed",
             error="Store not found",
         )
     if not store.enabled:
@@ -128,16 +167,44 @@ def refresh_store(db: Session, store_id: int) -> StoreRefreshResult:
         period_start = adapter_meta.get("period_start") or today - timedelta(days=today.weekday())
         period_end = adapter_meta.get("period_end") or period_start + timedelta(days=6)
 
-        cycle = AdCycle(
-            store_id=store.id,
-            period_start=period_start,
-            period_end=period_end,
-            fetched_at=datetime.utcnow(),
-            raw_payload_ref=adapter_meta.get("raw_payload_ref", f"store:{store.adapter_key}:week:{period_start.isoformat()}"),
+        # Upsert the AdCycle keyed on (store_id, period_start) so daily
+        # refreshes of the same ad week replace offers atomically instead of
+        # creating duplicate cycles (P1-3).
+        existing_cycle = (
+            db.query(AdCycle)
+            .filter(
+                AdCycle.store_id == store.id,
+                AdCycle.period_start == period_start,
+            )
+            .first()
         )
-        db.add(cycle)
-        db.commit()
-        db.refresh(cycle)
+        if existing_cycle is not None:
+            # Reuse the cycle; delete its existing offers (matches cascade).
+            db.query(Offer).filter(Offer.ad_cycle_id == existing_cycle.id).delete(
+                synchronize_session="fetch"
+            )
+            existing_cycle.period_end = period_end
+            existing_cycle.fetched_at = datetime.now(timezone.utc)
+            existing_cycle.raw_payload_ref = adapter_meta.get(
+                "raw_payload_ref",
+                f"store:{store.adapter_key}:week:{period_start.isoformat()}",
+            )
+            db.commit()
+            cycle = existing_cycle
+        else:
+            cycle = AdCycle(
+                store_id=store.id,
+                period_start=period_start,
+                period_end=period_end,
+                fetched_at=datetime.now(timezone.utc),
+                raw_payload_ref=adapter_meta.get(
+                    "raw_payload_ref",
+                    f"store:{store.adapter_key}:week:{period_start.isoformat()}",
+                ),
+            )
+            db.add(cycle)
+            db.commit()
+            db.refresh(cycle)
 
         # Build and save offers
         offer_count = 0
@@ -146,6 +213,14 @@ def refresh_store(db: Session, store_id: int) -> StoreRefreshResult:
             # If the adapter already parsed price info, use it directly;
             # otherwise fall back to build_offer which parses from raw_text.
             if raw.get("price", 0) > 0 or raw.get("deal_type", "sale") != "sale":
+                # Adapter already parsed price info.  Run it through
+                # normalize_price too so the new per-item / per-oz bases get
+                # populated consistently (P0-4).  We keep the adapter's values
+                # as fallbacks for effective_unit_price when normalization
+                # can't improve on them.
+                np = matching.normalize_price(
+                    raw.get("raw_text", ""), size_text=raw.get("size_text", "")
+                )
                 offer = Offer(
                     ad_cycle_id=cycle.id,
                     raw_text=raw.get("raw_text", ""),
@@ -157,6 +232,10 @@ def refresh_store(db: Session, store_id: int) -> StoreRefreshResult:
                     effective_unit_price=raw.get("effective_unit_price", 0),
                     unit_price_unknown=raw.get("unit_price_unknown", True),
                     requires_membership_or_coupon=raw.get("requires_membership_or_coupon", False),
+                    # Prefer the normalized bases; fall back to raw adapter
+                    # values only if normalize_price returned None.
+                    price_per_item_cents=np.price_per_item_cents if np.price_per_item_cents is not None else None,
+                    price_per_oz_cents=np.price_per_oz_cents if np.price_per_oz_cents is not None else None,
                 )
             else:
                 offer = matching.build_offer(
@@ -176,23 +255,23 @@ def refresh_store(db: Session, store_id: int) -> StoreRefreshResult:
         # Update price history
         _update_price_history(db, cycle)
 
-        crud.update_store_status(db, store.id, "success", fetched_at=datetime.utcnow())
+        crud.update_store_status(db, store.id, "ok", fetched_at=datetime.now(timezone.utc))
         return StoreRefreshResult(
             store_id=store.id,
             store_name=store.name,
-            status="success",
+            status="ok",
             offers_fetched=offer_count,
             matches_created=match_count,
         )
 
     except Exception as exc:
         logger.exception("Error refreshing store %s", store.name)
-        crud.update_store_status(db, store.id, f"error: {exc!s}")
+        crud.update_store_status(db, store.id, "failed")
         db.rollback()
         return StoreRefreshResult(
             store_id=store.id,
             store_name=store.name,
-            status="error",
+            status="failed",
             error=str(exc),
         )
 
@@ -257,11 +336,20 @@ def _update_price_history(db: Session, cycle: AdCycle) -> None:
 
     # Group best price per item
     best_by_item: dict[int, tuple[int, str]] = {}  # item_id → (price, deal_type)
+    item_cache: dict[int, Item] = {}
     for m in matches:
         offer = offer_map.get(m.offer_id)
         if offer is None:
             continue
-        unit_price = offer.effective_unit_price if offer.effective_unit_price > 0 else offer.price
+        item = item_cache.get(m.item_id)
+        if item is None:
+            item = db.get(Item, m.item_id)
+            if item is not None:
+                item_cache[m.item_id] = item
+        if item is None:
+            continue
+        # P0-4: use comparable price in the item's UoM basis.
+        unit_price, _approx = matching.compute_comparable_price(offer, item)
         if m.item_id not in best_by_item or unit_price < best_by_item[m.item_id][0]:
             best_by_item[m.item_id] = (unit_price, offer.deal_type)
 
@@ -276,9 +364,9 @@ def _update_price_history(db: Session, cycle: AdCycle) -> None:
         )
 
 
-# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------#
 # Scheduler setup
-# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------#
 
 
 def _scheduled_refresh_all() -> None:
@@ -295,6 +383,73 @@ def _scheduled_refresh_all() -> None:
         logger.exception("Scheduled refresh_all_stores failed")
 
 
+def _scheduled_refresh_store(store_id: int) -> None:
+    """Scheduled job: refresh a single store (used for ad-flip-day jobs)."""
+    logger.info("Scheduled refresh_store starting for store_id=%s", store_id)
+    db = SessionLocal()
+    try:
+        result = refresh_store(db, store_id)
+        logger.info(
+            "Scheduled refresh_store complete: store=%s status=%s offers=%d matches=%d",
+            result.store_name,
+            result.status,
+            result.offers_fetched,
+            result.matches_created,
+        )
+    except Exception:
+        logger.exception("Scheduled refresh_store failed for store_id=%s", store_id)
+    finally:
+        db.close()
+
+
+def _cleanup_old_payloads(retention_days: int = 90) -> None:
+    """Delete raw payload files older than *retention_days* (P1-7).
+
+    Scans the raw_payloads directory (resolved via the StoreAdapter helper, or
+    /data/raw_payloads) and deletes files whose modification time is older than
+    the retention window.  Logs the number of files deleted.
+    """
+    from app.adapters.base import StoreAdapter
+
+    try:
+        payload_dir = StoreAdapter._resolve_data_dir()
+    except Exception:
+        payload_dir = Path("/data/raw_payloads")
+        payload_dir.mkdir(parents=True, exist_ok=True)
+
+    cutoff = time.time() - retention_days * 86400
+    deleted = 0
+    try:
+        for entry in payload_dir.iterdir():
+            if not entry.is_file():
+                continue
+            try:
+                mtime = entry.stat().st_mtime
+            except OSError:
+                continue
+            if mtime < cutoff:
+                try:
+                    entry.unlink()
+                    deleted += 1
+                except OSError as exc:
+                    logger.warning("Could not delete old payload %s: %s", entry, exc)
+    except OSError as exc:
+        logger.warning("Could not scan payload dir %s: %s", payload_dir, exc)
+
+    if deleted:
+        logger.info("Cleanup: deleted %d raw payload files older than %d days", deleted, retention_days)
+    else:
+        logger.debug("Cleanup: no raw payload files older than %d days", retention_days)
+
+
+def _scheduled_cleanup_payloads() -> None:
+    """Scheduled job: delete raw payloads older than 90 days."""
+    try:
+        _cleanup_old_payloads(retention_days=90)
+    except Exception:
+        logger.exception("Scheduled payload cleanup failed")
+
+
 def _get_schedule_time() -> tuple[int, int]:
     """Read the configured refresh time from settings (HH:MM). Defaults to 07:00."""
     db = SessionLocal()
@@ -308,23 +463,100 @@ def _get_schedule_time() -> tuple[int, int]:
         db.close()
 
 
+def _get_schedule_timezone() -> str:
+    """Return the timezone for scheduling: from TZ env var or system default."""
+    tz = os.environ.get("TZ")
+    if tz:
+        return tz
+    # Fall back to the system local timezone, or UTC if not detectable.
+    try:
+        import datetime as _dt
+        localname = _dt.datetime.now(_dt.timezone.utc).astimezone().tzname()
+        if localname:
+            return localname
+    except Exception:
+        pass
+    return "UTC"
+
+
 def start_scheduler() -> BackgroundScheduler:
-    """Start the APScheduler background scheduler with the daily refresh job."""
+    """Start the APScheduler background scheduler.
+
+    Registers:
+    - The daily refresh-all job at the configured time (HH:MM from settings).
+    - Per-store ad-flip-day jobs that refresh an individual store on the
+      weekday its weekly ad flips (P1-5).
+    - A daily raw-payload retention cleanup job (P1-7).
+    """
     global _scheduler
     if _scheduler is not None:
         return _scheduler
 
     hour, minute = _get_schedule_time()
+    tz = _get_schedule_timezone()
 
-    _scheduler = BackgroundScheduler(timezone="UTC")
+    _scheduler = BackgroundScheduler(timezone=tz)
+
+    # Daily refresh-all job
     _scheduler.add_job(
         _scheduled_refresh_all,
-        CronTrigger(hour=hour, minute=minute),
+        CronTrigger(hour=hour, minute=minute, timezone=tz),
         id="refresh_all_stores",
         replace_existing=True,
     )
+
+    # Per-store ad-flip-day jobs (P1-5)
+    db = SessionLocal()
+    try:
+        stores = crud.get_stores(db)
+        for store in stores:
+            flip_day = AD_FLIP_DAYS.get(store.adapter_key)
+            if flip_day is None:
+                continue
+            job_id = f"refresh_store_flip_{store.id}"
+            _scheduler.add_job(
+                _scheduled_refresh_store,
+                CronTrigger(
+                    day_of_week=flip_day,
+                    hour=hour,
+                    minute=minute,
+                    timezone=tz,
+                ),
+                args=[store.id],
+                id=job_id,
+                replace_existing=True,
+            )
+            logger.info(
+                "Ad-flip-day job registered: store=%s day_of_week=%d at %02d:%02d %s",
+                store.adapter_key,
+                flip_day,
+                hour,
+                minute,
+                tz,
+            )
+    finally:
+        db.close()
+
+    # Daily 90-day raw-payload retention cleanup (P1-7), 1 hour after refresh
+    cleanup_hour = hour + 1
+    if cleanup_hour >= 24:
+        cleanup_hour = 0
+    _scheduler.add_job(
+        _scheduled_cleanup_payloads,
+        CronTrigger(hour=cleanup_hour, minute=minute, timezone=tz),
+        id="cleanup_old_payloads",
+        replace_existing=True,
+    )
+
     _scheduler.start()
-    logger.info("Scheduler started: daily refresh at %02d:%02d", hour, minute)
+    logger.info(
+        "Scheduler started: daily refresh at %02d:%02d %s, payload cleanup at %02d:%02d",
+        hour,
+        minute,
+        tz,
+        cleanup_hour,
+        minute,
+    )
     return _scheduler
 
 
@@ -341,12 +573,8 @@ def reschedule() -> None:
     global _scheduler
     if _scheduler is None:
         return
-    hour, minute = _get_schedule_time()
-    _scheduler.remove_job("refresh_all_stores")
-    _scheduler.add_job(
-        _scheduled_refresh_all,
-        CronTrigger(hour=hour, minute=minute),
-        id="refresh_all_stores",
-        replace_existing=True,
-    )
-    logger.info("Rescheduled: daily refresh at %02d:%02d", hour, minute)
+    # The simplest correct approach: stop and restart, which re-reads settings
+    # and re-registers all jobs (daily, ad-flip-day, cleanup).
+    _scheduler.shutdown(wait=False)
+    _scheduler = None
+    start_scheduler()

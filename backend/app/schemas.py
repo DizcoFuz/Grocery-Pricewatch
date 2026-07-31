@@ -177,6 +177,9 @@ class OfferRead(ORMModel):
     effective_unit_price: int
     unit_price_unknown: bool
     requires_membership_or_coupon: bool
+    # P0-4: explicit per-item and per-oz price bases (source of truth).
+    price_per_item_cents: int | None = None
+    price_per_oz_cents: int | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -306,6 +309,38 @@ class RecommendationsResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Best prices (P0-3: current vs. last best — headline feature)
+# ---------------------------------------------------------------------------
+
+
+class BestPriceEntry(BaseModel):
+    """Per-item best-price row for the best-prices table (FR-4.2/4.3)."""
+
+    item_id: int
+    item_name: str
+    category: str = ""
+    current_best_price: int | None = None  # cents
+    current_best_store_id: int | None = None
+    current_best_store_name: str = ""
+    current_best_deal_type: str = ""
+    last_best_price: int | None = None  # cents
+    last_best_store_name: str = ""
+    last_best_week: str = ""  # ISO date
+    delta_cents: int | None = None  # negative = cheaper (better)
+    delta_direction: str = ""  # "better" | "worse" | "unchanged" | "new"
+    all_time_best_price: int | None = None
+    all_time_best_store_name: str = ""
+    all_time_best_week: str = ""
+    other_store_prices: list[dict] = []  # [{store_name, price, deal_type, unit_price_unknown}]
+    unit_price_unknown: bool = False
+
+
+class BestPricesResponse(BaseModel):
+    items_with_deals: list[BestPriceEntry]
+    items_without_deals: list[BestPriceEntry]  # "No deals this week" section (FR-4.3)
+
+
+# ---------------------------------------------------------------------------
 # Savings
 # ---------------------------------------------------------------------------
 
@@ -347,6 +382,9 @@ class DashboardResponse(BaseModel):
     store_statuses: list[StoreStatus]
     review_queue_count: int
     last_report: WeeklyReportRead | None
+    banner: str | None = None
+    # P0-3: best-prices data for the best-deals table (current vs. last best).
+    best_prices: BestPricesResponse | None = None
 
 
 # ---------------------------------------------------------------------------

@@ -195,14 +195,23 @@ def extract_brand(text: str) -> str:
 
 @dataclass
 class NormalizedPrice:
-    """Result of parsing an offer's price text."""
+    """Result of parsing an offer's price text.
+
+    P0-4: the two source-of-truth bases are price_per_item_cents and
+    price_per_oz_cents. ``effective_unit_price`` is kept for backward
+    compatibility but is no longer used for offer-to-offer comparison —
+    use compute_comparable_price() for that.
+    """
 
     price: int = 0  # headline price in cents
     deal_type: str = "sale"
-    effective_unit_price: int = 0  # per-unit price in cents
+    effective_unit_price: int = 0  # legacy per-unit price (best-effort, kept for back-compat)
     unit_price_unknown: bool = True
     requires_membership_or_coupon: bool = False
     quantity: float = 1.0  # number of units the headline price buys
+    # New explicit bases (may be None when not derivable).
+    price_per_item_cents: int | None = None
+    price_per_oz_cents: int | None = None
 
 
 def _dollars_to_cents(dollar_str: str) -> int:
@@ -232,6 +241,25 @@ def _parse_size_text(size_text: str) -> tuple[float, str] | None:
     return (qty, unit)
 
 
+def _total_oz_from_size(size_text: str, quantity: float = 1.0) -> float | None:
+    """Return total ounces described by *size_text* times *quantity*.
+
+    ``size_text`` like "32 oz" with quantity 2 (multi-buy) → 64 oz.
+    Returns None if the unit isn't convertible to ounces (e.g. "ea", "ct").
+    """
+    size_info = _parse_size_text(size_text)
+    if size_info is None:
+        return None
+    size_qty, size_unit = size_info
+    factor = _UNIT_TO_OZ.get(size_unit.lower())
+    if factor is None or factor <= 0:
+        return None
+    return size_qty * factor * quantity
+
+
+_PER_LB_PATTERN = re.compile(r"/\s*lb\b|per\s+lb\b|per\s+pound\b|/\s*pound\b", re.IGNORECASE)
+
+
 def normalize_price(
     raw_text: str,
     *,
@@ -240,12 +268,12 @@ def normalize_price(
 ) -> NormalizedPrice:
     """Parse an offer's price text into a normalized price object.
 
-    Handles:
-    - Simple price: "$4.99"
-    - Multi-buy: "2 for $5", "3 for $10"
-    - BOGO: "buy one get one", "BOGO"
-    - "2/$5" notation
-    - Unit price computation from size_text
+    Computes two explicit bases (P0-4):
+      * ``price_per_item_cents`` — the per-item price when it is derivable
+        (simple sale, multi-buy, BOGO). None when unknown (e.g. per-lb
+        offer with no item count).
+      * ``price_per_oz_cents`` — the per-ounce price when the size is known
+        and convertible to ounces. None when unknown.
 
     All prices returned in integer cents.
     """
@@ -256,22 +284,43 @@ def normalize_price(
     text = raw_text.strip()
     result.requires_membership_or_coupon = bool(_MEMBERSHIP_PATTERN.search(text))
 
-    # --- BOGO detection ---
+    # --- BOGO detection (buy 1 get 1 free) ---
     if _BOGO_PATTERN.search(text):
-        # BOGO: pay for 1, get 2 → effective per-unit price = price / 2
         price_match = _PRICE_PATTERN.search(text)
         if price_match:
             price_cents = _dollars_to_cents(price_match.group(1))
             result.price = price_cents
             result.deal_type = "bogo"
             result.quantity = 2.0
-            result.effective_unit_price = price_cents // 2
-            result.unit_price_unknown = False
+            # Pay for 1, get 2 → per-item price is half the headline price.
+            result.price_per_item_cents = int(round(price_cents / 2))
+            # per-oz is derivable only if we know the size of one item.
+            total_oz = _total_oz_from_size(size_text, quantity=1.0)
+            if total_oz and total_oz > 0:
+                # BOGO: 2 items for the price of 1 → total oz = 2 * item_oz.
+                result.price_per_oz_cents = int(round(price_cents / (total_oz * 2)))
+            result.effective_unit_price = result.price_per_item_cents
+            result.unit_price_unknown = result.price_per_oz_cents is None
             return result
         # BOGO with no explicit price — mark unknown
         result.deal_type = "bogo"
         result.unit_price_unknown = True
         return result
+
+    # --- Per-lb pricing ("$2.99/lb", "$2.99 per pound") ---
+    if _PER_LB_PATTERN.search(text):
+        price_match = _PRICE_PATTERN.search(text)
+        if price_match:
+            price_cents = _dollars_to_cents(price_match.group(1))
+            result.price = price_cents
+            result.deal_type = "per_lb"
+            result.quantity = 1.0
+            # $X/lb → price_per_oz = X/16. price_per_item is unknown (no weight).
+            result.price_per_oz_cents = int(round(price_cents / 16))
+            result.price_per_item_cents = None
+            result.effective_unit_price = result.price_per_oz_cents
+            result.unit_price_unknown = False
+            return result
 
     # --- Multi-buy detection (e.g., "2 for $5", "3/$10") ---
     multi_match = _MULTI_BUY_PATTERN.search(text)
@@ -281,66 +330,91 @@ def normalize_price(
         result.price = total_cents
         result.deal_type = "multi_buy"
         result.quantity = float(qty)
-        per_unit = total_cents / qty if qty > 0 else 0
-        result.effective_unit_price = int(round(per_unit))
-        result.unit_price_unknown = False
-        # Try to compute per-oz if we have size info
+        # Per-item price = total / qty.
+        per_item = total_cents / qty if qty > 0 else 0
+        result.price_per_item_cents = int(round(per_item))
+        # Per-oz: total_cents / (total_oz across ALL qty items).
+        # P0-4 defect 2 fix: divide by total quantity per item × qty, not by the unit factor.
         if size_text:
-            size_info = _parse_size_text(size_text)
-            if size_info:
-                size_qty, size_unit = size_info
-                unit_to_oz = _UNIT_TO_OZ.get(size_unit.lower())
-                if unit_to_oz and size_qty > 0:
-                    total_oz = size_qty * unit_to_oz * qty
-                    result.effective_unit_price = int(round(per_unit / unit_to_oz)) if unit_to_oz else result.effective_unit_price
-                    # effective_unit_price remains per-item; use separate per-oz if needed
+            total_oz = _total_oz_from_size(size_text, quantity=float(qty))
+            if total_oz and total_oz > 0:
+                result.price_per_oz_cents = int(round(total_cents / total_oz))
+        result.effective_unit_price = result.price_per_item_cents
+        result.unit_price_unknown = result.price_per_oz_cents is None
         return result
 
-    # --- "X or Y" (e.g., "$3.99 or 2 for $7") — pick the first listed price ---
-    # Already handled by multi-buy if it matches; otherwise:
-
-    # --- Simple price ---
+    # --- Simple price ("$2.99") ---
     price_match = _PRICE_PATTERN.search(text)
     if price_match:
         price_cents = _dollars_to_cents(price_match.group(1))
         result.price = price_cents
         result.deal_type = "sale"
         result.quantity = 1.0
-
-        # Compute unit price from size text if available
+        # Per-item price = headline price (one item).
+        result.price_per_item_cents = price_cents
+        # Per-oz derivable from size_text (e.g. "$2.99" + "32 oz" → 299/32).
         if size_text:
-            size_info = _parse_size_text(size_text)
-            if size_info:
-                size_qty, size_unit = size_info
-                unit_to_oz = _UNIT_TO_OZ.get(size_unit.lower())
-                if unit_to_oz and size_qty > 0:
-                    total_oz = size_qty * unit_to_oz
-                    result.effective_unit_price = (
-                        int(round(price_cents / total_oz)) if total_oz > 0 else 0
-                    )
-                    result.unit_price_unknown = False
-                else:
-                    # If per-item (ea, ct, pk) and quantity known
-                    if size_unit in ("ea", "each", "ct", "count", "pk", "pack", "pkg", "package"):
-                        result.effective_unit_price = (
-                            int(round(price_cents / size_qty)) if size_qty > 0 else price_cents
-                        )
-                        result.unit_price_unknown = False
-                    else:
-                        result.effective_unit_price = price_cents
-                        result.unit_price_unknown = True
-            else:
-                result.effective_unit_price = price_cents
-                result.unit_price_unknown = True
-        else:
-            result.effective_unit_price = price_cents
-            result.unit_price_unknown = True
+            total_oz = _total_oz_from_size(size_text, quantity=1.0)
+            if total_oz and total_oz > 0:
+                result.price_per_oz_cents = int(round(price_cents / total_oz))
+        result.effective_unit_price = price_cents
+        result.unit_price_unknown = result.price_per_oz_cents is None
         return result
 
     # --- No price found ---
     result.deal_type = "unknown"
     result.unit_price_unknown = True
     return result
+
+
+# ---------------------------------------------------------------------------
+# Comparable price for offer-vs-item / offer-vs-offer comparison (P0-4)
+# ---------------------------------------------------------------------------
+
+
+# UoM groups
+_WEIGHT_UOMS = {"lb", "lbs", "pound", "oz", "ozs", "ounce", "g", "gram", "gr", "kg"}
+_COUNT_UOMS = {"ea", "each", "ct", "count", "pk", "pack", "pkg", "package", "dozen"}
+
+
+def _uom_is_weight(uom: str) -> bool:
+    return (uom or "").strip().lower() in _WEIGHT_UOMS
+
+
+def _uom_is_count(uom: str) -> bool:
+    return (uom or "").strip().lower() in _COUNT_UOMS
+
+
+def compute_comparable_price(offer: Offer, item: Item) -> tuple[int, bool]:
+    """Return (comparable_price_cents, is_approximate) for *offer* in the
+    item's unit-of-measure basis.
+
+    Rules (P0-4 / FR-3.3):
+      * If item.unit_of_measure is a weight (lb/oz/g/kg): use price_per_oz_cents,
+        converting to the item's UoM (lb → multiply by 16; oz → as-is).
+      * If item.unit_of_measure is a count (ea/ct/pk/dozen): use price_per_item_cents.
+      * If the needed basis is null on the offer: fall back to the raw headline
+        ``price`` and mark is_approximate=True.
+    """
+    uom = (item.unit_of_measure or "ea").strip().lower()
+
+    if _uom_is_weight(uom):
+        if offer.price_per_oz_cents is not None:
+            per_oz = offer.price_per_oz_cents
+            if uom in ("lb", "lbs", "pound"):
+                return per_oz * 16, False
+            # oz and other weight units: per-oz as-is
+            return per_oz, False
+        # Fall back to raw price — approximate
+        return offer.price, True
+
+    if _uom_is_count(uom):
+        if offer.price_per_item_cents is not None:
+            return offer.price_per_item_cents, False
+        return offer.price, True
+
+    # Unknown UoM: fall back to raw price, approximate.
+    return offer.price, True
 
 
 # ---------------------------------------------------------------------------
@@ -485,8 +559,13 @@ def process_matches(
     """Run all active items against all offers in an ad cycle.
 
     Creates Match records for confident + uncertain matches.
+    Before scoring, consults persisted MatchRules (FR-3.2): an "accepted" rule
+    creates an accepted match at confidence 1.0; a "rejected" rule skips the
+    offer for that item entirely.
     Returns the number of matches created.
     """
+    from app import crud
+
     offers = (
         db.query(Offer)
         .filter(Offer.ad_cycle_id == ad_cycle_id)
@@ -506,7 +585,27 @@ def process_matches(
 
     for offer in offers:
         offer_text = offer.raw_text or offer.product_name
+        normalized_offer = normalize_offer_text(offer_text)
         for item in items:
+            # --- MatchRule check (FR-3.2) ---
+            if normalized_offer:
+                rule = crud.get_match_rule(db, item.id, normalized_offer)
+                if rule is not None:
+                    if rule.decision == "accepted":
+                        match = Match(
+                            offer_id=offer.id,
+                            item_id=item.id,
+                            confidence=1.0,
+                            status=MatchStatus.accepted,
+                            decided_by=MatchDecidedBy.user,
+                        )
+                        db.add(match)
+                        created += 1
+                        continue
+                    elif rule.decision == "rejected":
+                        # Skip this offer for this item entirely.
+                        continue
+
             score_result = score_match(item, offer_text, offer.brand)
 
             if score_result.excluded:
@@ -559,4 +658,7 @@ def build_offer(
         effective_unit_price=np.effective_unit_price,
         unit_price_unknown=np.unit_price_unknown,
         requires_membership_or_coupon=np.requires_membership_or_coupon,
+        # P0-4: explicit per-item and per-oz price bases (source of truth).
+        price_per_item_cents=np.price_per_item_cents,
+        price_per_oz_cents=np.price_per_oz_cents,
     )

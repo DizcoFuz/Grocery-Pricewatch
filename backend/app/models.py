@@ -6,7 +6,7 @@ Uses SQLAlchemy 2.0 declarative style with Mapped / mapped_column.
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from enum import Enum
 
 from sqlalchemy import (
@@ -98,13 +98,16 @@ class Item(Base):
     baseline_price_override: Mapped[int | None] = mapped_column(Integer, nullable=True)
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=datetime.utcnow
+        DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
     )
 
     matches: Mapped[list[Match]] = relationship(
         back_populates="item", cascade="all, delete-orphan"
     )
     price_history: Mapped[list[PriceHistory]] = relationship(
+        back_populates="item", cascade="all, delete-orphan"
+    )
+    match_rules: Mapped[list[MatchRule]] = relationship(
         back_populates="item", cascade="all, delete-orphan"
     )
 
@@ -128,7 +131,7 @@ class AdCycle(Base):
     )
     period_start: Mapped[date] = mapped_column(Date, nullable=False)
     period_end: Mapped[date] = mapped_column(Date, nullable=False)
-    fetched_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    fetched_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
     raw_payload_ref: Mapped[str] = mapped_column(String(255), nullable=False, default="")
 
     store: Mapped[Store] = relationship(back_populates="ad_cycles")
@@ -168,6 +171,12 @@ class Offer(Base):
     requires_membership_or_coupon: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False
     )
+    # P0-4: explicit per-item and per-oz price bases (source of truth for comparisons).
+    # `price` remains the headline price (e.g. 299 for "$2.99"; 600 for "2 for $6").
+    # `effective_unit_price` is kept for backward compat but comparisons must go through
+    # matching.compute_comparable_price() using these two fields.
+    price_per_item_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    price_per_oz_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     ad_cycle: Mapped[AdCycle] = relationship(back_populates="offers")
     matches: Mapped[list[Match]] = relationship(
@@ -271,6 +280,32 @@ class WeeklyReport(Base):
 # ---------------------------------------------------------------------------
 # Setting
 # ---------------------------------------------------------------------------
+
+
+class MatchRule(Base):
+    """A user's accepted/rejected decision for an offer text, persisted so the
+    same offer text in future cycles auto-applies the decision (FR-3.2).
+    """
+
+    __tablename__ = "match_rules"
+    __table_args__ = (
+        UniqueConstraint("item_id", "normalized_offer_text", name="uq_match_rule"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    item_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("items.id", ondelete="CASCADE"), nullable=False
+    )
+    normalized_offer_text: Mapped[str] = mapped_column(String(500), nullable=False)
+    decision: Mapped[str] = mapped_column(String(20), nullable=False)  # "accepted" or "rejected"
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+    item: Mapped[Item] = relationship(back_populates="match_rules")
+
+    def __repr__(self) -> str:
+        return f"<MatchRule item={self.item_id} decision={self.decision} text={self.normalized_offer_text!r}>"
 
 
 class Setting(Base):

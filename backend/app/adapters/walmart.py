@@ -3,20 +3,19 @@
 Data acquisition path
 --------------------
 Walmart does not publish a traditional weekly circular.  Instead they expose
-"rollbacks" and deals through their storefront APIs.
+"rollbacks" and deals through their storefront pages.  Walmart's site is
+JS-heavy and behind bot detection (Akamai), so direct httpx GETs usually
+fail.  We use the browserless container to render the page, falling back
+to a raw httpx GET.
 
-1. **Primary** — Walmart grocery rollback/deals API.  The endpoint shape is::
+1. **Primary — Flipp API** (backflipp.wishabi.com).  Walmart's weekly ad is
+   also syndicated on Flipp, keyed by **postal code**.  This is the most
+   reliable path (no bot-wall, structured JSON).  We filter flyers by
+   ``merchant_name`` matching "walmart".
 
-       https://www.walmart.com/grocery/v2/api/deals
-       https://www.walmart.com/store/electronics/deals
-
-   In practice the exact internal API changes frequently and is gated by
-   bot detection (Akamai).  We attempt a known rollback endpoint and fall
-   back to the deals page HTML.
-
-2. **Fallback** — HTML scrape of the deals page, filtering to grocery
-   categories only (food, beverage, household essentials) by keyword
-   matching on product names / category breadcrumbs.
+2. **Fallback — browserless HTML scrape** of the grocery rollback page:
+   ``https://www.walmart.com/shop/grocery/rollback``
+   (filtered to grocery categories only via keyword matching).
 
 ToS note (spec §5.2): Walmart's ToS prohibits automated scraping.  The
 Walmart Affiliate/Developer API (if available) is the sanctioned path.
@@ -29,14 +28,14 @@ from __future__ import annotations
 import logging
 import re
 from datetime import date, timedelta
-from typing import Any, Optional
+from typing import Any
 
-from .base import AdMetadata, OfferData, StoreAdapter
+from .base import AdMetadata, OfferData, StoreAdapter, BrowserClient
+from .flipp_mixin import FlippMixin
 
 logger = logging.getLogger(__name__)
 
-WALMART_DEALS_URL = "https://www.walmart.com/store/electronics/deals"
-WALMART_GROCERY_API = "https://www.walmart.com/grocery/v2/api/deals"
+WALMART_GROCERY_ROLLBACK_URL = "https://www.walmart.com/shop/grocery/rollback"
 
 # Grocery-category keywords for filtering non-grocery deals out
 GROCERY_KEYWORDS = {
@@ -49,10 +48,11 @@ GROCERY_KEYWORDS = {
 }
 
 
-class WalmartAdapter(StoreAdapter):
+class WalmartAdapter(FlippMixin, StoreAdapter):
     STORE_KEY = "walmart"
     STORE_NAME = "Walmart"
     DEFAULT_RATE_LIMIT = 2.0
+    FLIPP_MERCHANT_PATTERN = r"walmart"
 
     def __init__(self, store_id: str = "walmart", zip_or_store_id: str = "") -> None:
         super().__init__(store_id, zip_or_store_id or "default")
@@ -65,15 +65,20 @@ class WalmartAdapter(StoreAdapter):
             store_location=self.zip_or_store_id,
         )
 
-        # Try API first
+        # Try Flipp first (thread ZIP code)
         try:
-            offers, meta = await self._fetch_via_api()
+            offers, meta = await self.fetch_flipp(self.zip_or_store_id)
             if offers:
-                return offers, meta
+                # Filter to grocery categories only
+                grocery_offers = [
+                    o for o in offers if _is_grocery(o.product_name) or _is_grocery(o.raw_text)
+                ]
+                if grocery_offers:
+                    return grocery_offers, meta
         except Exception as exc:  # pragma: no cover
-            logger.error("walmart: API path failed: %s", exc)
+            logger.error("walmart: Flipp path failed: %s", exc)
 
-        # Fallback HTML scrape
+        # Fallback HTML scrape via browserless
         try:
             offers, meta = await self._fetch_via_html()
             if offers:
@@ -84,73 +89,34 @@ class WalmartAdapter(StoreAdapter):
         logger.warning("walmart: no offers retrieved")
         return [], metadata
 
-    # --------------------------------------------------------------- API
-
-    async def _fetch_via_api(self) -> tuple[list[OfferData], AdMetadata]:
-        params = {"category": "grocery", "zip": self.zip_or_store_id}
-        resp = await self.fetch_with_retry(WALMART_GROCERY_API, params=params)
-        if resp is None:
-            return [], AdMetadata(store_location=self.zip_or_store_id)
-
-        try:
-            data = resp.json()
-        except ValueError:
-            return [], AdMetadata(store_location=self.zip_or_store_id)
-
-        self.save_raw_payload(data, suffix="_api")
-        return self._parse_api(data)
-
-    def _parse_api(self, data: dict[str, Any]) -> tuple[list[OfferData], AdMetadata]:
-        offers: list[OfferData] = []
-        items = data.get("items") or data.get("products") or data.get("deals") or []
-        if isinstance(items, dict):
-            items = list(items.values())
-
-        for item in items:
-            if not isinstance(item, dict):
-                continue
-            name = (item.get("name") or item.get("title") or "").strip()
-            if not name or not _is_grocery(name):
-                continue
-            price_raw = item.get("price") or item.get("salePrice") or item.get(
-                "rollbackPrice"
-            )
-            price = self.dollars_to_cents(price_raw)
-            if not price:
-                continue
-            size_text = (item.get("size") or item.get("packageSize") or "").strip()
-            brand = (item.get("brand") or "").strip()
-            deal_type = "rollback" if item.get("rollbackPrice") else "sale"
-            offers.append(
-                OfferData(
-                    raw_text=f"{name} ${price_raw}",
-                    product_name=name,
-                    brand=brand,
-                    size_text=size_text,
-                    price=price,
-                    deal_type=deal_type,
-                )
-            )
-
-        meta = AdMetadata(
-            period_start=date.today(),
-            period_end=date.today() + timedelta(days=6),
-            store_location=self.zip_or_store_id,
-        )
-        return offers, meta
-
     # --------------------------------------------------------------- HTML
 
     async def _fetch_via_html(self) -> tuple[list[OfferData], AdMetadata]:
-        resp = await self.fetch_with_retry(WALMART_DEALS_URL)
-        if resp is None:
+        url = WALMART_GROCERY_ROLLBACK_URL
+        if not await self.check_robots_txt(url):
+            logger.info("walmart: robots.txt disallows %s", url)
             return [], AdMetadata(store_location=self.zip_or_store_id)
-        self.save_raw_payload({"html": resp.text[:50000]}, suffix="_html")
+
+        # Try browserless first for JS-rendered page
+        html: str | None = None
+        try:
+            bc = BrowserClient()
+            html = await bc.render_page(url)
+        except Exception as exc:
+            logger.debug("walmart: browserless unavailable: %s", exc)
+
+        if not html:
+            resp = await self.fetch_with_retry(url)
+            if resp is None:
+                return [], AdMetadata(store_location=self.zip_or_store_id)
+            html = resp.text
+
+        self.save_raw_payload({"html": html[:50000]}, suffix="_html")
 
         offers: list[OfferData] = []
         # Walmart embeds product data in JSON scripts; naive regex parse
         for m in re.finditer(
-            r'"title"\s*:\s*"([^"]+)"[^}]*?"price"\s*:\s*"?(\d+\.?\d*)"?', resp.text
+            r'"title"\s*:\s*"([^"]+)"[^}]*?"price"\s*:\s*"?(\d+\.?\d*)"?', html
         ):
             name = m.group(1).strip()
             if not _is_grocery(name):

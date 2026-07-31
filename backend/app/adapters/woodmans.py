@@ -24,6 +24,7 @@ partnership would be preferable if available.
 from __future__ import annotations
 
 import logging
+import os
 import re
 from datetime import date, timedelta
 from typing import Any, Optional
@@ -33,7 +34,6 @@ from .base import AdMetadata, OfferData, StoreAdapter
 logger = logging.getLogger(__name__)
 
 WOODMANS_ADS_URL = "https://www.woodmans-food.com/weekly-ads"
-TESSERACT_OCR_URL = "http://tesseract:8080/ocr"
 
 # Regex patterns for price/size extraction from OCR text
 _PRICE_RE = re.compile(r"\$?\s*(\d{1,2}\.\d{2})\b")
@@ -54,8 +54,14 @@ class WoodmansAdapter(StoreAdapter):
     STORE_NAME = "Woodman's"
     DEFAULT_RATE_LIMIT = 3.0  # extra polite
 
+    #: Minimum OCR confidence (0–100) below which we flag results as partial.
+    OCR_CONFIDENCE_THRESHOLD = 60
+
     def __init__(self, store_id: str = "woodmans", zip_or_store_id: str = "") -> None:
         super().__init__(store_id, zip_or_store_id or "default")
+        self.tesseract_url = os.environ.get(
+            "TESSERACT_URL", "http://tesseract:8080/ocr"
+        )
 
     async def fetch_current_ad(self) -> tuple[list[OfferData], AdMetadata]:
         """Fetch Woodman's weekly ad via page scrape + OCR."""
@@ -76,7 +82,7 @@ class WoodmansAdapter(StoreAdapter):
             for link in ad_links[:3]:  # limit to 3 documents
                 try:
                     text, conf = await self._ocr_link(link)
-                    if conf < 60:
+                    if conf < self.OCR_CONFIDENCE_THRESHOLD:
                         partial = True
                     offers = self._parse_ocr_text(text)
                     all_offers.extend(offers)
@@ -104,18 +110,35 @@ class WoodmansAdapter(StoreAdapter):
 
     async def _find_ad_links(self) -> list[str]:
         """Scrape the Woodman's ads page for PDF/image links."""
-        resp = await self.fetch_with_retry(WOODMANS_ADS_URL)
-        if resp is None:
+        if not await self.check_robots_txt(WOODMANS_ADS_URL):
+            logger.info("woodmans: robots.txt disallows %s", WOODMANS_ADS_URL)
             return []
-        self.save_raw_payload({"html": resp.text[:50000]}, suffix="_page")
+
+        # Try browserless first for JS-rendered page
+        from .base import BrowserClient
+
+        html: str | None = None
+        try:
+            bc = BrowserClient()
+            html = await bc.render_page(WOODMANS_ADS_URL)
+        except Exception as exc:
+            logger.debug("woodmans: browserless unavailable: %s", exc)
+
+        if not html:
+            resp = await self.fetch_with_retry(WOODMANS_ADS_URL)
+            if resp is None:
+                return []
+            html = resp.text
+
+        self.save_raw_payload({"html": html[:50000]}, suffix="_page")
 
         # Find PDF and image links
         links = re.findall(
-            r'href="([^"]+\.(?:pdf|png|jpg|jpeg))"', resp.text, re.IGNORECASE
+            r'href="([^"]+\.(?:pdf|png|jpg|jpeg))"', html, re.IGNORECASE
         )
         # Also match src= for images
         links += re.findall(
-            r'src="([^"]+\.(?:png|jpg|jpeg))"', resp.text, re.IGNORECASE
+            r'src="([^"]+\.(?:png|jpg|jpeg))"', html, re.IGNORECASE
         )
         # De-dup, make absolute
         seen = set()
@@ -157,7 +180,7 @@ class WoodmansAdapter(StoreAdapter):
         async with httpx.AsyncClient(timeout=120) as client:
             files = {"file": ("ad", content, "application/octet-stream")}
             try:
-                ocr_resp = await client.post(TESSERACT_OCR_URL, files=files)
+                ocr_resp = await client.post(self.tesseract_url, files=files)
                 if ocr_resp.status_code != 200:
                     logger.warning(
                         "woodmans: OCR service returned %d", ocr_resp.status_code

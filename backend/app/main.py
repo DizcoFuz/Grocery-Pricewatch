@@ -9,17 +9,23 @@ from __future__ import annotations
 import csv
 import io
 import json
-from datetime import date, datetime
+import os
+import base64
+from datetime import date, datetime, timezone
+from contextlib import asynccontextmanager
 from typing import Any
 
-from fastapi import Body, Depends, FastAPI, File, Form, HTTPException, Query, UploadFile
+from fastapi import BackgroundTasks, Body, Depends, FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import PlainTextResponse, Response
+from fastapi.responses import JSONResponse, PlainTextResponse, Response
+from fastapi.staticfiles import StaticFiles
+from starlette.middleware.base import BaseHTTPMiddleware
 from sqlalchemy.orm import Session
 
 from app import crud, matching, recommendations, scheduler, seed
 from app.database import SessionLocal, get_db, init_db
 from app.schemas import (
+    BestPricesResponse,
     DashboardBestDeal,
     DashboardResponse,
     ItemCreate,
@@ -31,7 +37,6 @@ from app.schemas import (
     OfferRead,
     PriceHistoryRead,
     RecommendationsResponse,
-    RefreshAllResult,
     SavingsResponse,
     SettingsBundle,
     SettingUpdate,
@@ -47,9 +52,76 @@ from app.schemas import (
 )
 
 
-# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------#
+# Background refresh status (shared across requests for async refresh)
+# ---------------------------------------------------------------------------#
+
+_refresh_status: dict[str, Any] = {
+    "running": False,
+    "result": None,
+    "started_at": None,
+    "finished_at": None,
+}
+
+
+# ---------------------------------------------------------------------------#
+# Auth middleware for APP_PASSWORD
+# ---------------------------------------------------------------------------#
+
+
+class PasswordAuthMiddleware(BaseHTTPMiddleware):
+    """Simple Basic-Auth middleware gated by the APP_PASSWORD env var.
+
+    When APP_PASSWORD is unset/empty, all requests pass through (no auth).
+    When set, all ``/api/*`` endpoints (except ``/api/health``) require
+    a Basic-Auth header whose password component matches APP_PASSWORD.
+    Static assets and non-API paths are always allowed through.
+    """
+
+    async def dispatch(self, request, call_next):  # noqa: ANN001
+        password = os.environ.get("APP_PASSWORD", "")
+        if not password:
+            return await call_next(request)
+        path = request.url.path
+        if path == "/api/health" or not path.startswith("/api"):
+            return await call_next(request)
+        auth = request.headers.get("Authorization", "")
+        if auth.startswith("Basic "):
+            try:
+                decoded = base64.b64decode(auth[6:]).decode()
+                if ":" in decoded and decoded.split(":", 1)[1] == password:
+                    return await call_next(request)
+            except Exception:
+                pass
+        return JSONResponse(
+            status_code=401,
+            content={"detail": "Unauthorized"},
+            headers={"WWW-Authenticate": "Basic"},
+        )
+
+
+# ---------------------------------------------------------------------------#
 # App factory
-# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------#
+
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    """Lifespan context manager: startup + shutdown (replaces on_event)."""
+    # ── Startup ──
+    init_db()
+    db = SessionLocal()
+    try:
+        seed.seed_stores(db)
+        seed.seed_default_settings(db)
+    finally:
+        db.close()
+    scheduler.start_scheduler()
+
+    yield
+
+    # ── Shutdown ──
+    scheduler.stop_scheduler()
 
 
 def create_app() -> FastAPI:
@@ -57,46 +129,63 @@ def create_app() -> FastAPI:
         title="Grocery Pricewatch API",
         description="Track grocery prices across stores and find the best deals.",
         version="1.0.0",
+        lifespan=_lifespan,
     )
 
-    # CORS — allow all origins for dev
+    # ── Auth middleware (before CORS so it sees the original request) ──
+    app.add_middleware(PasswordAuthMiddleware)
+
+    # ── CORS ──
+    # If APP_PASSWORD is set, tighten CORS to not allow all origins.
+    app_password = os.environ.get("APP_PASSWORD", "")
+    if app_password:
+        allow_origins = []  # API is auth-protected; no cross-origin browser access
+    else:
+        allow_origins = ["*"]
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=allow_origins,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
     )
 
-    # ------------------------------------------------------------------
-    # Startup / shutdown
-    # ------------------------------------------------------------------
-
-    @app.on_event("startup")
-    def _startup() -> None:
-        init_db()
-        db = SessionLocal()
-        try:
-            seed.seed_stores(db)
-            seed.seed_default_settings(db)
-        finally:
-            db.close()
-        scheduler.start_scheduler()
-
-    @app.on_event("shutdown")
-    def _shutdown() -> None:
-        scheduler.stop_scheduler()
-
-    # ------------------------------------------------------------------
+    # ------------------------------------------------------------------ #
     # Register routes
-    # ------------------------------------------------------------------
+    # ------------------------------------------------------------------ #
     _register_routes(app)
+
+    # ------------------------------------------------------------------ #
+    # Mount SPA static files (must be last — catches everything else)
+    # ------------------------------------------------------------------ #
+    dist_dir = os.environ.get("FRONTEND_DIST", "/app/frontend/dist")
+    if os.path.isdir(dist_dir):
+        app.mount("/", StaticFiles(directory=dist_dir, html=True), name="frontend")
+
     return app
 
 
-# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------#
 # Routes
-# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------#
+
+
+def _do_refresh_all() -> None:
+    """Background task: refresh all stores and update the shared status dict."""
+    _refresh_status["running"] = True
+    _refresh_status["started_at"] = datetime.now(timezone.utc).isoformat()
+    _refresh_status["finished_at"] = None
+    _refresh_status["result"] = None
+    try:
+        result = scheduler.refresh_all_stores()
+        _refresh_status["result"] = (
+            result.model_dump() if hasattr(result, "model_dump") else result
+        )
+    except Exception as exc:
+        _refresh_status["result"] = {"error": str(exc)}
+    finally:
+        _refresh_status["running"] = False
+        _refresh_status["finished_at"] = datetime.now(timezone.utc).isoformat()
 
 
 def _register_routes(app: FastAPI) -> None:
@@ -105,7 +194,7 @@ def _register_routes(app: FastAPI) -> None:
     # Dashboard
     # ===================================================================
 
-    @app.get("/", response_model=DashboardResponse, tags=["Dashboard"])
+    @app.get("/api/dashboard", response_model=DashboardResponse, tags=["Dashboard"])
     def dashboard(db: Session = Depends(get_db)):
         """Return dashboard data: headline savings, best deals, store statuses, review queue."""
         # Latest weekly report
@@ -140,12 +229,17 @@ def _register_routes(app: FastAPI) -> None:
                 (d for d in recs.best_single.details if d.is_sale),
                 key=lambda d: d.line_total,
             )
-            baseline_map: dict[int, int] = {}
+            # P0-2: use the real 3-tier baseline; skip items with no baseline.
+            baseline_map: dict[int, int | None] = {}
             for item in crud.get_items(db, active_only=True):
-                baseline_map[item.id] = item.baseline_price_override or 500
+                baseline_map[item.id] = recommendations._get_item_baseline(db, item)
             for d in deal_items[:10]:
-                baseline = baseline_map.get(d.item_id, 500)
-                savings = max(baseline * d.quantity - d.line_total, 0)
+                baseline = baseline_map.get(d.item_id)
+                if baseline is None:
+                    # No derivable baseline → can't compute savings; show 0.
+                    savings = 0
+                else:
+                    savings = max(baseline * d.quantity - d.line_total, 0)
                 best_deals.append(
                     DashboardBestDeal(
                         item_name=d.item_name,
@@ -157,7 +251,10 @@ def _register_routes(app: FastAPI) -> None:
                     )
                 )
 
-        # Store statuses
+        # P0-3: best-prices data (current vs. last best) for the best-deals table.
+        best_prices = recommendations.compute_best_prices(db)
+
+        # Store statuses — compute stale/ok/failed/partial dynamically (FR-1.4)
         stores = crud.get_stores(db)
         store_statuses = [
             StoreStatus(
@@ -165,12 +262,22 @@ def _register_routes(app: FastAPI) -> None:
                 name=s.name,
                 enabled=s.enabled,
                 last_fetch_at=s.last_fetch_at,
-                last_fetch_status=s.last_fetch_status,
+                last_fetch_status=scheduler.compute_stale_status(
+                    s.last_fetch_at, s.last_fetch_status
+                ),
             )
             for s in stores
         ]
 
         review_count = crud.count_uncertain(db)
+
+        # Banner: warn if >50% of enabled stores failed
+        enabled_stores = [s for s in store_statuses if s.enabled]
+        banner = None
+        if enabled_stores:
+            failed_count = sum(1 for s in enabled_stores if s.last_fetch_status == "failed")
+            if len(enabled_stores) > 0 and failed_count / len(enabled_stores) > 0.5:
+                banner = "Warning: More than half of enabled stores failed to fetch fresh data"
 
         return DashboardResponse(
             headline_savings=headline_savings,
@@ -180,6 +287,8 @@ def _register_routes(app: FastAPI) -> None:
             store_statuses=store_statuses,
             review_queue_count=review_count,
             last_report=WeeklyReportRead.model_validate(report) if report else None,
+            banner=banner,
+            best_prices=best_prices,
         )
 
     # ===================================================================
@@ -221,10 +330,18 @@ def _register_routes(app: FastAPI) -> None:
         result = scheduler.refresh_store(db, store_id)
         return result
 
-    @app.post("/api/refresh-all", response_model=RefreshAllResult, tags=["Refresh"])
-    def refresh_all():
-        result = scheduler.refresh_all_stores()
-        return result
+    @app.post("/api/refresh-all", tags=["Refresh"])
+    def refresh_all(background_tasks: BackgroundTasks):
+        """Trigger a background refresh of all stores. Returns immediately."""
+        if _refresh_status["running"]:
+            return {"status": "already_running", "started_at": _refresh_status["started_at"]}
+        background_tasks.add_task(_do_refresh_all)
+        return {"status": "started"}
+
+    @app.get("/api/refresh-all/status", tags=["Refresh"])
+    def refresh_all_status():
+        """Poll the status of the most recent background refresh-all."""
+        return _refresh_status
 
     # ===================================================================
     # Items CRUD
@@ -387,6 +504,16 @@ def _register_routes(app: FastAPI) -> None:
     @app.get("/api/recommendations", response_model=RecommendationsResponse, tags=["Recommendations"])
     def get_recommendations(db: Session = Depends(get_db)):
         return recommendations.compute_recommendations(db)
+
+    # ===================================================================
+    # Best prices (P0-3: current vs. last best — headline feature)
+    # ===================================================================
+
+    @app.get("/api/best-prices", response_model=BestPricesResponse, tags=["Best Prices"])
+    def get_best_prices(db: Session = Depends(get_db)):
+        """Per-item current best offer/store, last best from PriceHistory,
+        all-time min, and delta + direction (FR-4.2/4.3)."""
+        return recommendations.compute_best_prices(db)
 
     # ===================================================================
     # Savings

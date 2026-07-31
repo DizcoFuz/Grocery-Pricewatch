@@ -1,6 +1,7 @@
 import axios from 'axios'
 import type {
   DashboardResponse,
+  BestPricesResponse,
   ItemRead,
   ItemCreate,
   ItemUpdate,
@@ -19,8 +20,9 @@ import type {
   SettingsBundle,
 } from './types'
 
-// baseURL is empty so we can hit the dashboard at "/" (root) and all API
-// routes at "/api/...". The backend serves the dashboard from GET /.
+// baseURL is empty so we can hit the SPA at "/" and all API routes at
+// "/api/...". The backend serves the dashboard from GET /api/dashboard and
+// the SPA from GET / (StaticFiles).
 const client = axios.create({
   baseURL: '',
   headers: { 'Content-Type': 'application/json' },
@@ -29,12 +31,30 @@ const client = axios.create({
 
 // ── Dashboard ────────────────────────────────────────────────
 export async function getDashboard(): Promise<DashboardResponse> {
-  const { data } = await client.get<DashboardResponse>('/')
+  const { data } = await client.get<DashboardResponse>('/api/dashboard')
   return data
 }
 
-export async function refreshAll(): Promise<RefreshAllResult> {
-  const { data } = await client.post<RefreshAllResult>('/api/refresh-all')
+export async function getBestPrices(): Promise<BestPricesResponse> {
+  const { data } = await client.get<BestPricesResponse>('/api/best-prices')
+  return data
+}
+
+// ── Refresh-all (async: POST starts the job, GET polls status) ──
+export interface RefreshAllStatus {
+  running: boolean
+  result: RefreshAllResult | { error: string } | null
+  started_at: string | null
+  finished_at: string | null
+}
+
+export async function refreshAll(): Promise<{ status: string; started_at?: string }> {
+  const { data } = await client.post<{ status: string; started_at?: string }>('/api/refresh-all')
+  return data
+}
+
+export async function getRefreshAllStatus(): Promise<RefreshAllStatus> {
+  const { data } = await client.get<RefreshAllStatus>('/api/refresh-all/status')
   return data
 }
 
