@@ -93,6 +93,21 @@ def _run_adapter(store: Store) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         "store_location": getattr(meta, "store_location", ""),
         "raw_payload_ref": getattr(meta, "raw_payload_ref", ""),
     }
+    logger.info(
+        "Adapter %s for store '%s' (zip=%s) returned %d offers",
+        store.adapter_key,
+        store.name,
+        store.zip_or_store_id,
+        len(raw_offers),
+    )
+    if not raw_offers:
+        logger.warning(
+            "Adapter %s returned 0 offers for store '%s' (zip=%s) — "
+            "check network connectivity to the store API",
+            store.adapter_key,
+            store.name,
+            store.zip_or_store_id,
+        )
     return raw_offers, metadata
 
 

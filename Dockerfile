@@ -31,6 +31,7 @@ RUN mkdir -p /data /data/raw_payloads
 
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONPATH=/app/backend
+ENV LOG_LEVEL=DEBUG
 
 EXPOSE 8000
 

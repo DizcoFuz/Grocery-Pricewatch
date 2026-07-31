@@ -125,6 +125,15 @@ async def _lifespan(app: FastAPI):
 
 
 def create_app() -> FastAPI:
+    # Configure logging so adapter/scheduler warnings appear in docker logs
+    import logging as _logging
+    level = os.environ.get("LOG_LEVEL", "INFO").upper()
+    _logging.basicConfig(
+        level=getattr(_logging, level, _logging.INFO),
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        force=True,
+    )
+
     app = FastAPI(
         title="Grocery Pricewatch API",
         description="Track grocery prices across stores and find the best deals.",
