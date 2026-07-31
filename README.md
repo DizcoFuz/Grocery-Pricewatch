@@ -125,6 +125,7 @@ All settings are in the DB (editable via UI Settings page) or `.env`:
 - **P2-10 — Realized savings ("shopped it" checkbox):** FR-6.2 is an optional nice-to-have that is not yet implemented. The shopping list has checkboxes in the UI but they are not persisted or used to compute realized savings vs. projected savings.
 - **Adapter verification:** Adapter endpoints have been researched and updated to use plausible real APIs (Flipp `backflipp.wishabi.com`, Target `redsky.target.com`, etc.), but no adapter has been verified against a live store endpoint. Fixture-based parser tests exist under `backend/tests/fixtures/` but are mock-based. See the "Verified" column in the adapter table above.
 - **Docker compose build:** Not yet verified end-to-end from a clean checkout (R-5 from re-review). The Dockerfile and compose file are structurally complete, but `docker compose up --build` should be run on a host with Docker to verify: healthchecks pass, SPA loads at `/`, auth engages when `APP_PASSWORD` is set, and data survives `down`/`up`.
+- **Healthcheck removal:** The tesseract and browserless containers ship no shell or curl, so CMD-based healthchecks always fail. The compose file uses `depends_on: service_started` instead of `service_healthy` for these services. The app container retains its own healthcheck (the one that matters for acceptance criterion 10).
 
 ## License
 

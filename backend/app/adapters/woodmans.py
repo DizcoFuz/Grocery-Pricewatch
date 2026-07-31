@@ -8,8 +8,8 @@ https://www.woodmans-food.com/weekly-ads (or similar).
 
 1. **Primary** — Scrape the ads page for links to weekly-ad PDFs or images.
 2. **Download** the PDF/image.
-3. **OCR** via a tesseract HTTP service at ``http://tesseract:8884/ocr``
-   (container in the docker-compose stack).
+3. **OCR** via a tesseract HTTP service at ``http://tesseract:8884/tesseract``
+   (container in the docker-compose stack — hertzg/tesseract-server).
 4. **Parse** the OCR text with regex patterns for price/size, then structure
    into :class:`OfferData`.
 5. **Flag partial** if OCR confidence is low.
@@ -60,7 +60,7 @@ class WoodmansAdapter(StoreAdapter):
     def __init__(self, store_id: str = "woodmans", zip_or_store_id: str = "") -> None:
         super().__init__(store_id, zip_or_store_id or "default")
         self.tesseract_url = os.environ.get(
-            "TESSERACT_URL", "http://tesseract:8884/ocr"
+            "TESSERACT_URL", "http://tesseract:8884/tesseract"
         )
 
     async def fetch_current_ad(self) -> tuple[list[OfferData], AdMetadata]:
@@ -162,6 +162,12 @@ class WoodmansAdapter(StoreAdapter):
         """Download the PDF/image and run it through the tesseract service.
 
         Returns ``(text, confidence)`` where confidence is 0–100.
+
+        The hertzg/tesseract-server API contract:
+          POST /tesseract  (multipart)
+            - file: the image/PDF
+            - options: JSON string, e.g. '{"languages": ["eng"]}'
+          Response: {"data": {"stdout": "<text>", "stderr": "...", "exitCode": 0}}
         """
         # Download the document
         resp = await self.fetch_with_retry(url)
@@ -173,14 +179,15 @@ class WoodmansAdapter(StoreAdapter):
         )
 
         # Send to tesseract OCR service
-        # The service accepts multipart file upload and returns JSON
         import httpx
+        import json as _json
 
         await self.rate_limit()
         async with httpx.AsyncClient(timeout=120) as client:
             files = {"file": ("ad", content, "application/octet-stream")}
+            data = {"options": _json.dumps({"languages": ["eng"]})}
             try:
-                ocr_resp = await client.post(self.tesseract_url, files=files)
+                ocr_resp = await client.post(self.tesseract_url, files=files, data=data)
                 if ocr_resp.status_code != 200:
                     logger.warning(
                         "woodmans: OCR service returned %d", ocr_resp.status_code
@@ -191,12 +198,23 @@ class WoodmansAdapter(StoreAdapter):
                 logger.error("woodmans: OCR request failed: %s", exc)
                 return "", 0.0
 
-        text = ocr_data.get("text", "")
-        confidence = float(ocr_data.get("confidence", 0))
+        # hertzg/tesseract-server returns {"data": {"stdout": "...", "exitCode": 0}}
+        ocr_inner = ocr_data.get("data", ocr_data)
+        text = ocr_inner.get("stdout", "")
+        exit_code = ocr_inner.get("exitCode", 1)
+
+        # Derive confidence: non-empty stdout with exitCode 0 = full confidence,
+        # empty stdout or non-zero exit = low confidence.
+        if exit_code == 0 and len(text.strip()) > 0:
+            confidence = 100.0
+        else:
+            confidence = 0.0
+
         logger.info(
-            "woodmans: OCR %s → %d chars, %.1f%% conf",
+            "woodmans: OCR %s → %d chars, exit=%d, %.1f%% conf",
             url,
             len(text),
+            exit_code,
             confidence,
         )
         return text, confidence

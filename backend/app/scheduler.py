@@ -255,11 +255,17 @@ def refresh_store(db: Session, store_id: int) -> StoreRefreshResult:
         # Update price history
         _update_price_history(db, cycle)
 
-        crud.update_store_status(db, store.id, "ok", fetched_at=datetime.now(timezone.utc))
+        # Determine final status: "partial" if the adapter signaled partial OCR,
+        # otherwise "ok" (W-3 from fifth review).
+        final_status = "ok"
+        if adapter_meta and getattr(adapter_meta, "raw_payload_ref", "") == "partial":
+            final_status = "partial"
+
+        crud.update_store_status(db, store.id, final_status, fetched_at=datetime.now(timezone.utc))
         return StoreRefreshResult(
             store_id=store.id,
             store_name=store.name,
-            status="ok",
+            status=final_status,
             offers_fetched=offer_count,
             matches_created=match_count,
         )

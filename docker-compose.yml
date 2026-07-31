@@ -16,7 +16,7 @@ services:
     env_file:
       - .env
     environment:
-      - TESSERACT_URL=http://tesseract:8884/ocr
+      - TESSERACT_URL=http://tesseract:8884/tesseract
       - BROWSER_URL=http://browserless:3000
       - DEFAULT_ZIP=${DEFAULT_ZIP:-60601}
     depends_on:
