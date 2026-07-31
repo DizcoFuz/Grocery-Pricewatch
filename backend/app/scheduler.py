@@ -264,8 +264,17 @@ def refresh_store(db: Session, store_id: int) -> StoreRefreshResult:
             offer_count += 1
         db.commit()
 
+        logger.info(
+            "Store '%s': saved %d offers to cycle %d",
+            store.name, offer_count, cycle.id,
+        )
+
         # Run matching pipeline
         match_count = matching.process_matches(db, cycle.id)
+        logger.info(
+            "Store '%s': process_matches created %d matches",
+            store.name, match_count,
+        )
 
         # Update price history
         _update_price_history(db, cycle)

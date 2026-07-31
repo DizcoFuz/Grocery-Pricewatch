@@ -12,6 +12,7 @@ All price math in integer cents.
 
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass, field
 from typing import Any
@@ -19,6 +20,8 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.models import AdCycle, Item, Match, MatchDecidedBy, MatchStatus, Offer
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -572,6 +575,16 @@ def process_matches(
         .all()
     )
     items = db.query(Item).filter(Item.active.is_(True)).all()
+
+    logger.info(
+        "process_matches: cycle=%d, %d offers, %d active items",
+        ad_cycle_id, len(offers), len(items),
+    )
+    if items:
+        logger.info(
+            "process_matches: items=%s",
+            [i.name for i in items],
+        )
 
     created = 0
 
