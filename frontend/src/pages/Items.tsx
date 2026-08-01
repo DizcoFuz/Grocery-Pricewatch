@@ -377,7 +377,7 @@ function PriceHistoryChart({ itemId }: { itemId: number }) {
             tickFormatter={(v) => `$${v.toFixed(2)}`}
           />
           <Tooltip
-            formatter={(v: number) => [`$${v.toFixed(2)}`, 'Unit price']}
+            formatter={(v) => [`$${Number(v ?? 0).toFixed(2)}`, 'Unit price']}
             contentStyle={{ fontSize: 12, borderRadius: 8 }}
           />
           <Line

@@ -33,7 +33,7 @@ services:
 
   # ── Headless browser for JS-rendered store ad pages ──────────
   browserless:
-    image: ghcr.io/browserless/chromium:latest
+    image: ghcr.io/browserless/chromium:v2.16.0
     container_name: grocery-browserless
     restart: unless-stopped
     environment:
@@ -43,7 +43,7 @@ services:
 
   # ── Tesseract OCR server for image/PDF circulars (Woodman's) ─
   tesseract:
-    image: hertzg/tesseract-server:latest
+    image: hertzg/tesseract-server:3.1.2
     container_name: grocery-tesseract
     restart: unless-stopped
 
